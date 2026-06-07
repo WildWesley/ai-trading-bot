@@ -22,7 +22,7 @@ cd ai-trading-bot/trading-bot
 bash deploy/setup-pi.sh
 ```
 
-This installs Python deps (in `venv/`), Node.js + the Claude Code CLI, `cloudflared`, and the two systemd units (resolved to your user/home).
+This installs Python deps (in `venv/`), Node.js + the Claude Code CLI, `cloudflared`, and the three systemd units (resolved to your user/home).
 
 ## 3. Configure secrets
 
@@ -59,9 +59,11 @@ cloudflared tunnel route dns trading-bot trading-bot.yourdomain.com
 ## 5. Enable and start the services
 
 ```bash
-sudo systemctl enable --now trading-bot cloudflared
-systemctl status trading-bot cloudflared
+sudo systemctl enable --now trading-bot dashboard cloudflared
+systemctl status trading-bot dashboard cloudflared
 ```
+
+The **trading-bot** service runs the bot headless; the **dashboard** service runs Streamlit on port 8501 (what the tunnel serves); **cloudflared** exposes it.
 
 The dashboard is now at `https://trading-bot.yourdomain.com`. It is read-only — it shows account, positions, trades, equity curve, and the strategy chart, with no controls to place or cancel trades.
 
@@ -78,11 +80,12 @@ sudo systemctl restart trading-bot
 
 ```bash
 journalctl -u trading-bot -f     # live bot log
+journalctl -u dashboard -f      # live dashboard (Streamlit) log
 journalctl -u cloudflared -f     # live tunnel log
 ```
 
 - **Bot exits immediately:** check `.env` exists and keys are valid paper keys (`journalctl -u trading-bot` shows the validation messages).
-- **Dashboard 502 via the tunnel:** confirm Streamlit is up on the Pi (`curl -I http://localhost:8501`) and that `config.yml` points at port 8501.
+- **Dashboard 502 via the tunnel:** confirm Streamlit is up on the Pi (`curl -I http://localhost:8501`), ensure the **dashboard** service is running (`systemctl status dashboard`), and that `config.yml` points at port 8501.
 - **Tunnel won't start:** verify `~/.cloudflared/config.yml` path and that the credentials JSON referenced exists.
 
 ## No-domain option (Quick Tunnel)

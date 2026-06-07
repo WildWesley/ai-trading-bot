@@ -39,10 +39,12 @@ if ! command -v cloudflared >/dev/null 2>&1; then
 fi
 
 echo "==> Installing systemd units (substituting user/home)..."
-for unit in trading-bot cloudflared; do
-  sed -e "s/^WorkingDirectory=%h/WorkingDirectory=${RUN_HOME//\//\\/}/" \
-      -e "s/^ExecStart=%h/ExecStart=${RUN_HOME//\//\\/}/" \
-      "$REPO_DIR/deploy/${unit}.service" \
+for unit in trading-bot dashboard cloudflared; do
+  # Replace every %h with the real home. A '#' delimiter avoids escaping the
+  # slashes in $HOME, and the unanchored global match also catches the %h that
+  # appears mid-line in cloudflared's --config path. (System units don't expand
+  # %h to the User's home, so we bake in the literal path here.)
+  sed "s#%h#${RUN_HOME}#g" "$REPO_DIR/deploy/${unit}.service" \
     | sudo tee "/etc/systemd/system/${unit}.service" >/dev/null
   # Run the service as the invoking (non-root) user.
   sudo sed -i "/^\[Service\]/a User=${RUN_USER}" \
@@ -63,8 +65,8 @@ Next (manual) steps — see deploy/README.md for detail:
        # then write ~/.cloudflared/config.yml (template in README) and:
        cloudflared tunnel route dns trading-bot <your-hostname>
   3. Enable and start the services:
-       sudo systemctl enable --now trading-bot cloudflared
+       sudo systemctl enable --now trading-bot dashboard cloudflared
   4. Check status / logs:
-       systemctl status trading-bot cloudflared
+       systemctl status trading-bot dashboard cloudflared
        journalctl -u trading-bot -f
 EOF
