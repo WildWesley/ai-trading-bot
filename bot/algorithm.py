@@ -96,7 +96,7 @@ def compute_daily_trend(daily_bars_df: pd.DataFrame | None) -> str:
     slow = config.EMA_TREND_SLOW_PERIOD
     if (
         daily_bars_df is None
-        or "close" not in getattr(daily_bars_df, "columns", [])
+        or "close" not in daily_bars_df.columns
         or len(daily_bars_df) < slow
     ):
         return "unknown"

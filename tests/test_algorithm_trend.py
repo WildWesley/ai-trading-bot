@@ -27,3 +27,24 @@ def test_empty_frame_returns_unknown():
 
 def test_none_returns_unknown():
     assert algorithm.compute_daily_trend(None) == "unknown"
+
+
+def test_exactly_slow_period_bars_is_decisive():
+    # With exactly EMA_TREND_SLOW_PERIOD bars, EMA(slow) has a valid (non-NaN)
+    # latest value, so the result must be a real verdict, not "unknown".
+    from bot import config
+
+    bars = make_bars(rising_closes(config.EMA_TREND_SLOW_PERIOD))
+    assert algorithm.compute_daily_trend(bars) == "up"
+
+
+def test_one_below_slow_period_is_unknown():
+    from bot import config
+
+    bars = make_bars(rising_closes(config.EMA_TREND_SLOW_PERIOD - 1))
+    assert algorithm.compute_daily_trend(bars) == "unknown"
+
+
+def test_dataframe_without_close_column_is_unknown():
+    df = pd.DataFrame({"open": [1.0, 2.0, 3.0]})  # has rows, no "close"
+    assert algorithm.compute_daily_trend(df) == "unknown"
