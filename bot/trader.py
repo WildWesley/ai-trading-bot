@@ -69,12 +69,27 @@ class Trader:
         self.last_analysis: dict[str, dict] = {}
         self.cycle_count = 0
         self.last_cycle_at: str | None = None
+        # Daily trend cache (symbol -> "up"/"down"/"unknown"), refreshed once
+        # per calendar day. Crypto entries stay "unknown" and bypass the filter.
+        self._trend_cache: dict[str, str] = {}
+        self._trend_cache_date: str | None = None
+        # Market-state flag, set each cycle by the market guard (a later task).
+        # Default True so trading works before the first market check runs.
+        self._stock_trading_allowed: bool = True
+        # Market-open transition tracking. _market_was_open starts None
+        # (unknown) so a bot started mid-session does NOT impose an opening
+        # blackout — that only fires on an observed closed->open transition.
+        self._market_was_open: bool | None = None
+        self._market_opened_at: datetime | None = None
+        self._flattened_today: bool = False
 
     # -- Public API ------------------------------------------------------
     def run_cycle(self) -> None:
         """Run one full trading cycle. Never raises — errors become events."""
         self.cycle_count += 1
         self.log("info", f"Cycle {self.cycle_count} started.")
+        self._warm_trend_cache_if_needed()
+        self._update_market_state()
         for symbol in self.watchlist:
             try:
                 self._process_symbol(symbol)
@@ -108,8 +123,156 @@ class Trader:
         with self._lock:
             return list(self.events)[-limit:][::-1]
 
+    # -- Market hours ----------------------------------------------------
+    def _update_market_state(self) -> None:
+        """Set ``self._stock_trading_allowed`` from the market clock.
+
+        Rules (stocks only — crypto always trades):
+          * market closed                -> stock trading off
+          * within MARKET_BLACKOUT_MINUTES of open  -> off (opening blackout)
+          * within MARKET_BLACKOUT_MINUTES of close -> off, and flatten all
+            stock positions once for the day (overnight-gap protection)
+        On any clock failure, stock trading is disabled for this cycle (safe
+        default); crypto is unaffected.
+        """
+        try:
+            clock = self.client.get_clock()
+        except Exception as exc:  # noqa: BLE001 - degrade safely
+            self.log(
+                "error",
+                f"market clock unavailable; pausing stock trades: {exc}",
+            )
+            self._stock_trading_allowed = False
+            return
+
+        is_open = bool(clock.get("is_open"))
+        now_utc = datetime.now(timezone.utc)
+
+        # Observed closed -> open transition: record open time, reset flatten.
+        if is_open and self._market_was_open is False:
+            self._market_opened_at = now_utc
+            self._flattened_today = False
+            self.log("info", "Market opened.")
+        self._market_was_open = is_open
+
+        if not is_open:
+            self._stock_trading_allowed = False
+            return
+
+        blackout = config.MARKET_BLACKOUT_MINUTES * 60
+
+        in_opening_blackout = (
+            self._market_opened_at is not None
+            and (now_utc - self._market_opened_at).total_seconds() < blackout
+        )
+
+        # NOTE: the EOD flatten relies on at least one cycle landing inside the
+        # closing window, i.e. TRADE_INTERVAL_SECONDS < MARKET_BLACKOUT_MINUTES*60
+        # (default 300s < 900s). If the interval is raised above the blackout
+        # width, a cycle could skip the window and positions go unflattened.
+        next_close = clock.get("next_close")
+        in_closing_blackout = False
+        if next_close is not None:
+            secs_to_close = (next_close - now_utc).total_seconds()
+            in_closing_blackout = 0 <= secs_to_close < blackout
+        else:
+            self.log(
+                "warning",
+                "market clock missing next_close; skipping closing-blackout "
+                "/ end-of-day flatten this cycle.",
+            )
+
+        if in_closing_blackout and not self._flattened_today:
+            self._flatten_stock_positions()
+            # Set even if the flatten logged per-symbol errors: only attempt the
+            # EOD flatten once per day rather than retrying every cycle.
+            self._flattened_today = True
+
+        self._stock_trading_allowed = not (
+            in_opening_blackout or in_closing_blackout
+        )
+
+    def _flatten_stock_positions(self) -> None:
+        """Close every open *stock* position (crypto is left running 24/7)."""
+        self.log("info", "End-of-day: flattening all stock positions.")
+        try:
+            positions = self.client.get_positions()
+        except Exception as exc:  # noqa: BLE001
+            self.log("error", f"EOD flatten: could not list positions: {exc}")
+            return
+        for pos in positions:
+            symbol = str(pos.get("symbol", ""))
+            if not symbol or is_crypto_symbol(symbol):
+                continue
+            try:
+                order = self.client.close_position(symbol)
+                fill = (
+                    order.get("filled_avg_price")
+                    or pos.get("current_price")
+                    or 0.0
+                )
+                qty = float(pos.get("qty", 0))
+                pnl = float(pos.get("unrealized_pl", 0.0))
+                trade = {
+                    "symbol": symbol,
+                    "side": "sell",
+                    "qty": qty,
+                    "price": fill,
+                    "total_value": round(qty * fill, 2),
+                    "signal_reason": "End-of-day flatten (market-close blackout).",
+                    "timestamp": _utc_now_iso(),
+                    "pnl_at_close": round(pnl, 2),
+                }
+                self.db.record_trade(trade)
+                self.log(
+                    "trade",
+                    f"EOD SELL {qty} {symbol} @ ${fill:.2f} "
+                    f"(P&L ${pnl:+.2f}).",
+                )
+            except Exception as exc:  # noqa: BLE001 - isolate per-symbol faults
+                self.log("error", f"EOD flatten failed for {symbol}: {exc}")
+
+    # -- Trend cache -----------------------------------------------------
+    def _warm_trend_cache_if_needed(self) -> None:
+        """Populate the daily-trend cache once per calendar day.
+
+        Fetches ``TREND_LOOKBACK_BARS`` daily bars per stock and classifies the
+        trend via ``algorithm.compute_daily_trend``. Crypto is recorded as
+        "unknown" (it bypasses the filter). Per-symbol failures degrade to
+        "unknown" rather than aborting the warm-up.
+        """
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if self._trend_cache_date == today and self._trend_cache:
+            return
+        self.log("info", "Warming daily-trend cache...")
+        new_cache: dict[str, str] = {}
+        total = len(self.watchlist)
+        for i, symbol in enumerate(self.watchlist, start=1):
+            if is_crypto_symbol(symbol):
+                new_cache[symbol] = "unknown"
+                continue
+            try:
+                daily = self.client.get_bars(
+                    symbol, "1Day", config.TREND_LOOKBACK_BARS
+                )
+                new_cache[symbol] = algorithm.compute_daily_trend(daily)
+            except Exception as exc:  # noqa: BLE001 - isolate per-symbol faults
+                new_cache[symbol] = "unknown"
+                self.log("error", f"{symbol}: trend warm-up failed: {exc}")
+            if i % 25 == 0:
+                self.log("info", f"Trend cache: {i}/{total} symbols...")
+        self._trend_cache = new_cache
+        self._trend_cache_date = today
+        up = sum(1 for v in new_cache.values() if v == "up")
+        down = sum(1 for v in new_cache.values() if v == "down")
+        self.log("info", f"Trend cache ready: {up} up, {down} down.")
+
     # -- Per-symbol logic ------------------------------------------------
     def _process_symbol(self, symbol: str) -> None:
+        # Stocks pause when the market is closed or in a blackout window;
+        # crypto trades around the clock.
+        if not is_crypto_symbol(symbol) and not self._stock_trading_allowed:
+            return
         bars = self.client.get_bars(
             symbol, f"{config.BAR_TIMEFRAME_MINUTES}Min", config.BARS_LOOKBACK
         )
@@ -130,6 +293,15 @@ class Trader:
         ) > 0
 
         if signal == "BUY" and not has_position:
+            if not is_crypto_symbol(symbol):
+                trend = self._trend_cache.get(symbol, "unknown")
+                if trend == "down":
+                    self.log(
+                        "debug",
+                        f"{symbol}: BUY skipped — daily trend bearish "
+                        f"(death cross).",
+                    )
+                    return
             self._open_long(symbol, analysis)
         elif signal == "SELL" and has_position:
             self._close_long(symbol, analysis, position)

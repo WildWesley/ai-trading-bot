@@ -221,6 +221,22 @@ class AlpacaClient:
             "currency": str(getattr(acct, "currency", "USD")),
         }
 
+    # -- Market clock ----------------------------------------------------
+    def get_clock(self) -> dict[str, Any]:
+        """Return the market clock: is_open plus next open/close timestamps.
+
+        ``next_open`` / ``next_close`` are timezone-aware datetimes straight
+        from alpaca-py. Authoritative for trading hours and holidays, so the
+        trader uses this rather than computing Eastern time locally.
+        """
+        clock = _with_backoff(self._trading.get_clock, what="get_clock")
+        return {
+            "is_open": bool(getattr(clock, "is_open", False)),
+            "next_open": getattr(clock, "next_open", None),
+            "next_close": getattr(clock, "next_close", None),
+            "timestamp": getattr(clock, "timestamp", None),
+        }
+
     # -- Positions -------------------------------------------------------
     def get_positions(self) -> list[dict[str, Any]]:
         """Return open positions with unrealized P&L."""

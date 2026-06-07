@@ -71,10 +71,24 @@ TUI (main thread) ─► reads database + alpaca_client every 5s ─► renders
 
 ## Strategy summary
 
-Per symbol, on 5-minute candles (last 50 bars):
-- **BUY**: `RSI(14) < 35` **and** `EMA(9)` crosses above `EMA(21)`
+Two-timeframe strategy:
+
+**Long-term filter (daily bars, 365-day lookback):** a stock is only eligible
+for BUYs when EMA(50) > EMA(200) (golden cross). Computed once per day and
+cached per symbol in the trader (`_warm_trend_cache_if_needed`). Crypto bypasses
+this filter. See `algorithm.compute_daily_trend`.
+
+**Short-term timing (5-minute candles, last 50 bars):**
+- **BUY**: `RSI(14) < 35` **and** `EMA(9)` crosses above `EMA(21)` **and** the
+  daily trend is not "down"
 - **SELL**: `RSI(14) > 65` **and** `EMA(9)` crosses below `EMA(21)`
 - **HOLD**: otherwise
+
+**Market-hours guard (stocks only):** no new stock trades in the first/last 15
+minutes of the session (`MARKET_BLACKOUT_MINUTES`) or while the market is
+closed; all stock positions are flattened ~15 minutes before close to avoid
+overnight gap risk. Crypto trades 24/7. Driven by Alpaca's `/clock` endpoint
+(`alpaca_client.get_clock`, `trader._update_market_state`).
 
 ## Conventions
 
