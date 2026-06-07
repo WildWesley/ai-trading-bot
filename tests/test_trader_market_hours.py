@@ -83,3 +83,31 @@ def test_clock_failure_disables_stock_trading(fake_client, fake_db):
     t = _trader(fake_client, fake_db, ["AAPL"])
     t._update_market_state()
     assert t._stock_trading_allowed is False
+
+
+def test_opening_blackout_blocks_stock_trading_just_after_open(fake_client, fake_db):
+    now = datetime.now(timezone.utc)
+    fake_client.clock["is_open"] = True
+    fake_client.clock["next_close"] = now + timedelta(hours=4)
+    t = _trader(fake_client, fake_db, ["AAPL"])
+    # Simulate the prior cycle having seen the market CLOSED, so this call
+    # observes a genuine closed->open transition and records the open time.
+    t._market_was_open = False
+    t._update_market_state()
+    # We are within MARKET_BLACKOUT_MINUTES of the just-recorded open time.
+    assert t._market_opened_at is not None
+    assert t._stock_trading_allowed is False
+
+
+def test_missing_next_close_skips_closing_blackout(fake_client, fake_db):
+    now = datetime.now(timezone.utc)
+    fake_client.clock["is_open"] = True
+    fake_client.clock["next_close"] = None
+    t = _trader(fake_client, fake_db, ["AAPL"])
+    # Market already open earlier today, well past the opening blackout.
+    t._market_was_open = True
+    t._market_opened_at = now - timedelta(hours=2)
+    t._update_market_state()
+    # No next_close -> no closing blackout -> stocks still allowed, nothing flattened.
+    assert t._stock_trading_allowed is True
+    assert fake_db.trades == []

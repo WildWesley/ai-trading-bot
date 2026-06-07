@@ -171,9 +171,17 @@ class Trader:
         if next_close is not None:
             secs_to_close = (next_close - now_utc).total_seconds()
             in_closing_blackout = 0 <= secs_to_close < blackout
+        else:
+            self.log(
+                "warning",
+                "market clock missing next_close; skipping closing-blackout "
+                "/ end-of-day flatten this cycle.",
+            )
 
         if in_closing_blackout and not self._flattened_today:
             self._flatten_stock_positions()
+            # Set even if the flatten logged per-symbol errors: only attempt the
+            # EOD flatten once per day rather than retrying every cycle.
             self._flattened_today = True
 
         self._stock_trading_allowed = not (
