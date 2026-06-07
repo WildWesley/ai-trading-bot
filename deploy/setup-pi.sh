@@ -29,22 +29,27 @@ sudo npm install -g @anthropic-ai/claude-code
 
 echo "==> Installing cloudflared..."
 if ! command -v cloudflared >/dev/null 2>&1; then
-  sudo mkdir -p /usr/share/keyrings
-  curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
-    | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
-  echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" \
-    | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
-  sudo apt-get update -y
-  sudo apt-get install -y cloudflared
+  # Install the prebuilt .deb straight from Cloudflare's GitHub releases for
+  # this machine's architecture (arm64 on a 64-bit Pi). This avoids the apt
+  # repo, which can 404 on some Raspberry Pi OS codenames.
+  ARCH="$(dpkg --print-architecture)"
+  curl -fsSL \
+    "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${ARCH}.deb" \
+    -o /tmp/cloudflared.deb
+  sudo dpkg -i /tmp/cloudflared.deb || sudo apt-get install -f -y
+  rm -f /tmp/cloudflared.deb
 fi
 
-echo "==> Installing systemd units (substituting user/home)..."
+echo "==> Installing systemd units (substituting repo/home)..."
 for unit in trading-bot dashboard cloudflared; do
-  # Replace every %h with the real home. A '#' delimiter avoids escaping the
-  # slashes in $HOME, and the unanchored global match also catches the %h that
-  # appears mid-line in cloudflared's --config path. (System units don't expand
-  # %h to the User's home, so we bake in the literal path here.)
-  sed "s#%h#${RUN_HOME}#g" "$REPO_DIR/deploy/${unit}.service" \
+  # Substitute placeholders with the real paths and install as a system unit.
+  #   %REPO% -> the cloned repo directory (wherever it actually lives)
+  #   %h     -> the user's home (used by cloudflared's --config path)
+  # A '#' sed delimiter avoids escaping slashes; matches are global so the %h
+  # mid-line in cloudflared's config path is also resolved. (System units don't
+  # expand these specifiers to the User's values, so we bake in literals here.)
+  sed -e "s#%REPO%#${REPO_DIR}#g" -e "s#%h#${RUN_HOME}#g" \
+    "$REPO_DIR/deploy/${unit}.service" \
     | sudo tee "/etc/systemd/system/${unit}.service" >/dev/null
   # Run the service as the invoking (non-root) user.
   sudo sed -i "/^\[Service\]/a User=${RUN_USER}" \
