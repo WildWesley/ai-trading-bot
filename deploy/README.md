@@ -12,8 +12,8 @@ Run the trading bot 24/7 on a Raspberry Pi with the dashboard reachable from any
 
 ```bash
 cd ~
-git clone https://github.com/WildWesley/ai-trading-bot.git
-cd ai-trading-bot/trading-bot
+git clone git@github.com:WildWesley/ai-trading-bot.git
+cd ai-trading-bot
 ```
 
 ## 2. Run the setup script
@@ -72,7 +72,7 @@ The dashboard is now at `https://trading-bot.yourdomain.com`. It is read-only â€
 ```bash
 cd ~/ai-trading-bot
 git pull
-~/ai-trading-bot/trading-bot/venv/bin/pip install -r trading-bot/requirements.txt
+~/ai-trading-bot/venv/bin/pip install -r requirements.txt
 sudo systemctl restart trading-bot
 ```
 
