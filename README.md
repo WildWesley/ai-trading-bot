@@ -225,3 +225,10 @@ trading-bot/
 - The strategy is intentionally simple and is **not** tuned for profitability.
 - Market data and trading require an active Alpaca paper account; outside US
   market hours, bar data may be limited and few/no signals will fire.
+
+## Running on a Raspberry Pi (24/7)
+
+To run the bot continuously on a Raspberry Pi with a public, read-only
+dashboard accessible from anywhere, see [`deploy/README.md`](deploy/README.md).
+It covers the one-shot setup script, systemd services, and a Cloudflare
+Tunnel for remote access.
