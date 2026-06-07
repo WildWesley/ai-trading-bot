@@ -90,9 +90,43 @@ CLAUDE_MODEL: str = _get_str("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 # Trading parameters
 # ---------------------------------------------------------------------------
 WATCHLIST: list[str] = _get_list(
-    "WATCHLIST", ["AAPL", "MSFT", "NVDA", "TSLA", "SPY"]
+    "WATCHLIST",
+    [
+        # Large cap tech
+        "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "NFLX",
+        "AMD", "CRM",
+        # Semiconductors
+        "INTC", "QCOM", "AVGO", "MU", "TSM",
+        # Finance
+        "JPM", "BAC", "GS", "WFC", "MS", "BLK", "V", "MA", "AXP", "C",
+        "SCHW", "PYPL",
+        # Healthcare
+        "JNJ", "UNH", "PFE", "ABBV", "LLY", "MRK", "ABT", "CVS", "ISRG",
+        "VRTX", "AMGN", "GILD",
+        # Energy
+        "XOM", "CVX", "COP", "SLB", "EOG", "OXY",
+        # Consumer
+        "WMT", "COST", "PG", "KO", "PEP", "HD", "TGT", "MCD", "SBUX",
+        "NKE", "LOW",
+        # Industrials
+        "BA", "CAT", "DE", "HON", "UPS", "GE", "LMT", "RTX",
+        # Cloud / growth
+        "SNOW", "PLTR", "UBER", "SHOP", "DDOG", "NOW", "ADBE", "ORCL",
+        "ZM", "COIN", "SQ", "ABNB",
+        # Auto
+        "F", "GM",
+        # Telecom / media
+        "DIS", "CMCSA", "T", "VZ",
+        # REITs
+        "AMT", "PLD", "EQIX",
+        # ETFs
+        "SPY", "QQQ", "IWM", "GLD", "TLT", "XLF", "XLE", "XLV",
+        # Crypto (24/7 — bypass the market-hours guard and trend filter)
+        "BTC/USD", "ETH/USD", "SOL/USD", "LTC/USD", "AVAX/USD",
+        "LINK/USD", "UNI/USD",
+    ],
 )
-TRADE_INTERVAL_SECONDS: int = _get_int("TRADE_INTERVAL_SECONDS", 60)
+TRADE_INTERVAL_SECONDS: int = _get_int("TRADE_INTERVAL_SECONDS", 300)
 MAX_POSITION_SIZE_USD: float = _get_float("MAX_POSITION_SIZE_USD", 1000.0)
 
 # ---------------------------------------------------------------------------
@@ -105,6 +139,16 @@ EMA_FAST_PERIOD: int = 9
 EMA_SLOW_PERIOD: int = 21
 RSI_BUY_THRESHOLD: float = 35.0
 RSI_SELL_THRESHOLD: float = 65.0
+
+# Daily trend filter (golden cross on daily bars). A BUY signal on a stock is
+# skipped unless its medium-term trend is above its long-term trend.
+EMA_TREND_FAST_PERIOD: int = 50    # daily EMA, "golden cross" fast leg
+EMA_TREND_SLOW_PERIOD: int = 200   # daily EMA, "golden cross" slow leg
+TREND_LOOKBACK_BARS: int = 365     # daily bars to fetch for the trend check
+
+# Market-hours guard. Stocks are not traded in the first/last N minutes of the
+# session; all stock positions are flattened before close. Crypto is exempt.
+MARKET_BLACKOUT_MINUTES: int = 15
 
 # ---------------------------------------------------------------------------
 # UI
