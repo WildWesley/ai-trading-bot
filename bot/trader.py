@@ -69,12 +69,20 @@ class Trader:
         self.last_analysis: dict[str, dict] = {}
         self.cycle_count = 0
         self.last_cycle_at: str | None = None
+        # Daily trend cache (symbol -> "up"/"down"/"unknown"), refreshed once
+        # per calendar day. Crypto entries stay "unknown" and bypass the filter.
+        self._trend_cache: dict[str, str] = {}
+        self._trend_cache_date: str | None = None
+        # Market-state flag, set each cycle by the market guard (a later task).
+        # Default True so trading works before the first market check runs.
+        self._stock_trading_allowed: bool = True
 
     # -- Public API ------------------------------------------------------
     def run_cycle(self) -> None:
         """Run one full trading cycle. Never raises — errors become events."""
         self.cycle_count += 1
         self.log("info", f"Cycle {self.cycle_count} started.")
+        self._warm_trend_cache_if_needed()
         for symbol in self.watchlist:
             try:
                 self._process_symbol(symbol)
@@ -108,6 +116,41 @@ class Trader:
         with self._lock:
             return list(self.events)[-limit:][::-1]
 
+    # -- Trend cache -----------------------------------------------------
+    def _warm_trend_cache_if_needed(self) -> None:
+        """Populate the daily-trend cache once per calendar day.
+
+        Fetches ``TREND_LOOKBACK_BARS`` daily bars per stock and classifies the
+        trend via ``algorithm.compute_daily_trend``. Crypto is recorded as
+        "unknown" (it bypasses the filter). Per-symbol failures degrade to
+        "unknown" rather than aborting the warm-up.
+        """
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if self._trend_cache_date == today and self._trend_cache:
+            return
+        self.log("info", "Warming daily-trend cache...")
+        new_cache: dict[str, str] = {}
+        total = len(self.watchlist)
+        for i, symbol in enumerate(self.watchlist, start=1):
+            if is_crypto_symbol(symbol):
+                new_cache[symbol] = "unknown"
+                continue
+            try:
+                daily = self.client.get_bars(
+                    symbol, "1Day", config.TREND_LOOKBACK_BARS
+                )
+                new_cache[symbol] = algorithm.compute_daily_trend(daily)
+            except Exception as exc:  # noqa: BLE001 - isolate per-symbol faults
+                new_cache[symbol] = "unknown"
+                self.log("error", f"{symbol}: trend warm-up failed: {exc}")
+            if i % 25 == 0:
+                self.log("info", f"Trend cache: {i}/{total} symbols...")
+        self._trend_cache = new_cache
+        self._trend_cache_date = today
+        up = sum(1 for v in new_cache.values() if v == "up")
+        down = sum(1 for v in new_cache.values() if v == "down")
+        self.log("info", f"Trend cache ready: {up} up, {down} down.")
+
     # -- Per-symbol logic ------------------------------------------------
     def _process_symbol(self, symbol: str) -> None:
         bars = self.client.get_bars(
@@ -130,6 +173,15 @@ class Trader:
         ) > 0
 
         if signal == "BUY" and not has_position:
+            if not is_crypto_symbol(symbol):
+                trend = self._trend_cache.get(symbol, "unknown")
+                if trend == "down":
+                    self.log(
+                        "debug",
+                        f"{symbol}: BUY skipped — daily trend bearish "
+                        f"(death cross).",
+                    )
+                    return
             self._open_long(symbol, analysis)
         elif signal == "SELL" and has_position:
             self._close_long(symbol, analysis, position)
