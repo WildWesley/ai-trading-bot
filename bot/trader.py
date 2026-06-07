@@ -166,6 +166,10 @@ class Trader:
             and (now_utc - self._market_opened_at).total_seconds() < blackout
         )
 
+        # NOTE: the EOD flatten relies on at least one cycle landing inside the
+        # closing window, i.e. TRADE_INTERVAL_SECONDS < MARKET_BLACKOUT_MINUTES*60
+        # (default 300s < 900s). If the interval is raised above the blackout
+        # width, a cycle could skip the window and positions go unflattened.
         next_close = clock.get("next_close")
         in_closing_blackout = False
         if next_close is not None:
