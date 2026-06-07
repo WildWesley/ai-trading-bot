@@ -82,6 +82,9 @@ class Trader:
         self._market_was_open: bool | None = None
         self._market_opened_at: datetime | None = None
         self._flattened_today: bool = False
+        # Per-symbol "can this stock be bought by a fractional/notional dollar
+        # amount?" cache, so a BUY doesn't re-query the asset every cycle.
+        self._fractionable_cache: dict[str, bool] = {}
 
     # -- Public API ------------------------------------------------------
     def run_cycle(self) -> None:
@@ -309,6 +312,23 @@ class Trader:
             # Quietly hold; avoid flooding the event log on every HOLD.
             pass
 
+    def _is_fractionable(self, symbol: str) -> bool:
+        """Whether ``symbol`` can be bought by a notional (fractional) amount.
+
+        Cached per symbol. On any lookup failure, returns False so the BUY
+        falls back to safe whole-share sizing.
+        """
+        if symbol in self._fractionable_cache:
+            return self._fractionable_cache[symbol]
+        try:
+            asset = self.client.get_asset(symbol)
+            frac = bool(asset.get("fractionable", False))
+        except Exception as exc:  # noqa: BLE001 - degrade to whole shares
+            self.log("error", f"{symbol}: fractionable check failed: {exc}")
+            frac = False
+        self._fractionable_cache[symbol] = frac
+        return frac
+
     def _open_long(self, symbol: str, analysis: dict) -> None:
         price = analysis.get("price") or self.client.get_latest_price(symbol)
         if not price or price <= 0:
@@ -319,22 +339,34 @@ class Trader:
             # Crypto trades fractionally, so a $1000 cap buys 0.0xyz BTC rather
             # than requiring a whole coin. Round to 6 dp (Alpaca's precision).
             qty = round(self.max_position_usd / price, 6)
-            too_small = qty <= 0
-        else:
-            # Stocks: whole shares only.
-            qty = int(self.max_position_usd // price)
-            too_small = qty < 1
-        if too_small:
-            self.log(
-                "info",
-                f"{symbol}: price ${price:.2f} exceeds max position "
-                f"${self.max_position_usd:.0f}; skipping BUY.",
+            if qty <= 0:
+                self.log("info", f"{symbol}: budget too small; skipping BUY.")
+                return
+            order = self.client.place_market_order(symbol, qty, "buy")
+            est_qty = qty
+        elif self._is_fractionable(symbol):
+            # Fractionable stock: spend the whole dollar budget via a notional
+            # order, so the share price never wastes budget or blocks the buy.
+            order = self.client.place_market_order(
+                symbol, side="buy", notional=self.max_position_usd
             )
-            return
+            est_qty = round(self.max_position_usd / price, 6)
+        else:
+            # Non-fractionable stock: whole shares only.
+            qty = int(self.max_position_usd // price)
+            if qty < 1:
+                self.log(
+                    "info",
+                    f"{symbol}: price ${price:.2f} exceeds max position "
+                    f"${self.max_position_usd:.0f} and not fractionable; "
+                    f"skipping BUY.",
+                )
+                return
+            order = self.client.place_market_order(symbol, qty, "buy")
+            est_qty = qty
 
-        order = self.client.place_market_order(symbol, qty, "buy")
         fill_price = order.get("filled_avg_price") or price
-        filled_qty = order.get("filled_qty") or qty
+        filled_qty = order.get("filled_qty") or est_qty
 
         trade = {
             "symbol": symbol,

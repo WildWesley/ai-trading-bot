@@ -449,25 +449,64 @@ class AlpacaClient:
     def place_market_order(
         self,
         symbol: str,
-        qty: float,
-        side: Literal["buy", "sell"],
+        qty: float | None = None,
+        side: Literal["buy", "sell"] = "buy",
+        *,
+        notional: float | None = None,
     ) -> dict[str, Any]:
-        """Submit a market order (DAY) and return a normalized order dict."""
+        """Submit a market order and return a normalized order dict.
+
+        Provide exactly one of ``qty`` (share/coin quantity) or ``notional``
+        (a dollar amount — fractional). Notional orders let stocks be sized to a
+        dollar budget regardless of share price; Alpaca requires DAY
+        time-in-force for them, which stocks already use.
+        """
+        if (qty is None) == (notional is None):
+            raise AlpacaClientError(
+                "place_market_order requires exactly one of qty or notional."
+            )
         order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
-        # Crypto only accepts GTC/IOC; stocks use DAY. Crypto also allows
-        # fractional quantities (sized in the trader).
+        # Crypto only accepts GTC/IOC; stocks use DAY (also required for
+        # fractional/notional orders).
         tif = TimeInForce.GTC if is_crypto_symbol(symbol) else TimeInForce.DAY
-        request = MarketOrderRequest(
-            symbol=symbol,
-            qty=qty,
-            side=order_side,
-            time_in_force=tif,
-        )
+        if notional is not None:
+            request = MarketOrderRequest(
+                symbol=symbol,
+                notional=notional,
+                side=order_side,
+                time_in_force=tif,
+            )
+            what = f"submit_order({symbol},{side},${notional})"
+        else:
+            request = MarketOrderRequest(
+                symbol=symbol,
+                qty=qty,
+                side=order_side,
+                time_in_force=tif,
+            )
+            what = f"submit_order({symbol},{side},{qty})"
         order = _with_backoff(
             lambda: self._trading.submit_order(request),
-            what=f"submit_order({symbol},{side},{qty})",
+            what=what,
         )
         return self._normalize_order(order)
+
+    def get_asset(self, symbol: str) -> dict[str, Any]:
+        """Return asset metadata: ``fractionable`` and ``tradable`` flags.
+
+        Used to decide whether a stock can be bought by a notional (fractional)
+        dollar amount or only in whole shares. ``fractionable`` defaults to
+        False when the attribute is absent, so callers fall back to whole shares.
+        """
+        asset = _with_backoff(
+            lambda: self._trading.get_asset(symbol),
+            what=f"get_asset({symbol})",
+        )
+        return {
+            "symbol": str(getattr(asset, "symbol", symbol)),
+            "fractionable": bool(getattr(asset, "fractionable", False)),
+            "tradable": bool(getattr(asset, "tradable", False)),
+        }
 
     def close_position(self, symbol: str) -> dict[str, Any]:
         """Liquidate the entire position in ``symbol``; return the order dict."""
