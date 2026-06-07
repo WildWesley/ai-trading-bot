@@ -78,6 +78,37 @@ def indicator_frame(bars_df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def compute_daily_trend(daily_bars_df: pd.DataFrame | None) -> str:
+    """Classify a symbol's long-term trend from daily bars.
+
+    Uses a "golden cross": the medium-term EMA vs the long-term EMA on daily
+    closes (windows from ``config.EMA_TREND_FAST_PERIOD`` /
+    ``EMA_TREND_SLOW_PERIOD``).
+
+    Returns
+    -------
+    "up"      EMA(fast) > EMA(slow) on the latest bar (uptrend; BUYs allowed).
+    "down"    EMA(fast) < EMA(slow) (downtrend; BUYs skipped).
+    "unknown" not enough data to decide (fewer than slow-period bars, or no
+              usable ``close`` column). Treated as "don't block" by callers.
+    """
+    fast = config.EMA_TREND_FAST_PERIOD
+    slow = config.EMA_TREND_SLOW_PERIOD
+    if (
+        daily_bars_df is None
+        or "close" not in getattr(daily_bars_df, "columns", [])
+        or len(daily_bars_df) < slow
+    ):
+        return "unknown"
+
+    close = daily_bars_df["close"].astype(float).reset_index(drop=True)
+    ema_fast = EMAIndicator(close=close, window=fast).ema_indicator().iloc[-1]
+    ema_slow = EMAIndicator(close=close, window=slow).ema_indicator().iloc[-1]
+    if math.isnan(ema_fast) or math.isnan(ema_slow):
+        return "unknown"
+    return "up" if ema_fast > ema_slow else "down"
+
+
 def signal_series(ind: pd.DataFrame, symbol: str = "") -> pd.Series:
     """Compute the BUY/SELL/HOLD signal at *every* bar of an indicator frame.
 
