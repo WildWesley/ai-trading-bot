@@ -76,6 +76,8 @@ class FakeClient:
         self.positions: dict[str, dict[str, Any]] = {}
         self.orders: list[dict[str, Any]] = []
         self.closed: list[str] = []
+        # Per-symbol asset metadata; default (when unset) is fractionable.
+        self.assets: dict[str, dict[str, Any]] = {}
 
     def get_clock(self) -> dict[str, Any]:
         return self.clock
@@ -97,13 +99,26 @@ class FakeClient:
     def get_latest_price(self, symbol: str) -> float:
         return 100.0
 
-    def place_market_order(self, symbol: str, qty: float, side: str) -> dict[str, Any]:
+    def place_market_order(
+        self, symbol: str, qty: float | None = None, side: str = "buy",
+        *, notional: float | None = None,
+    ) -> dict[str, Any]:
+        # Fake fill price is 100.0; estimate a filled qty for notional orders.
+        if notional is not None and qty is None:
+            filled = round(notional / 100.0, 6)
+        else:
+            filled = qty if qty is not None else 0
         order = {
-            "symbol": symbol, "side": side, "qty": qty,
-            "filled_qty": qty, "filled_avg_price": 100.0,
+            "symbol": symbol, "side": side, "qty": qty or 0, "notional": notional,
+            "filled_qty": filled, "filled_avg_price": 100.0,
         }
         self.orders.append(order)
         return order
+
+    def get_asset(self, symbol: str) -> dict[str, Any]:
+        return self.assets.get(
+            symbol, {"symbol": symbol, "fractionable": True, "tradable": True}
+        )
 
     def close_position(self, symbol: str) -> dict[str, Any]:
         self.closed.append(symbol)

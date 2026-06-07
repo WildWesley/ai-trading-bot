@@ -90,6 +90,19 @@ closed; all stock positions are flattened ~15 minutes before close to avoid
 overnight gap risk. Crypto trades 24/7. Driven by Alpaca's `/clock` endpoint
 (`alpaca_client.get_clock`, `trader._update_market_state`).
 
+## Position sizing (`trader._open_long`)
+
+Each BUY targets a dollar budget, `MAX_POSITION_SIZE_USD` (default $1000).
+- **Crypto**: fractional quantity = `round(budget / price, 6)`.
+- **Fractionable stocks**: a **notional** order spends the whole budget
+  regardless of share price (`place_market_order(..., notional=budget)`).
+  Fractionability is checked once per symbol via `alpaca_client.get_asset` and
+  cached (`_fractionable_cache`); on lookup failure it falls back to whole shares.
+- **Non-fractionable stocks**: whole shares = `floor(budget / price)`; the BUY
+  is skipped if even one share exceeds the budget.
+
+There is no global cap on concurrent positions — each BUY is sized independently.
+
 ## Conventions
 
 - Keep `algorithm.py` pure and side-effect free so it's unit-testable.
