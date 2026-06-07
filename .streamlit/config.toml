@@ -12,3 +12,10 @@ textColor = "#e6e6e6"
 
 [browser]
 gatherUsageStats = false
+
+[server]
+# Bind all interfaces so the Cloudflare Tunnel (and LAN) can reach the
+# dashboard on the Pi. headless=true suppresses the first-run email prompt.
+headless = true
+address = "0.0.0.0"
+port = 8501
