@@ -1,0 +1,14 @@
+# Streamlit configuration for the AI trading bot dashboard.
+# Picked up automatically when Streamlit is run from the trading-bot/ directory
+# (which is how bot.main launches it, and how `streamlit run dashboard.py`
+# should be run).
+
+[theme]
+base = "dark"
+primaryColor = "#4cc9f0"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#161a23"
+textColor = "#e6e6e6"
+
+[browser]
+gatherUsageStats = false

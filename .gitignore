@@ -1,0 +1,30 @@
+# Environment
+.env
+.env.local
+
+# Logs
+data/*.log
+
+# Database (created at runtime)
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

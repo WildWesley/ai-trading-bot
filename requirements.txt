@@ -1,0 +1,24 @@
+# Alpaca market data + paper trading SDK
+alpaca-py>=0.33.0
+
+# Anthropic Claude API SDK
+anthropic>=0.40.0
+
+# Terminal UI
+rich>=13.7.0
+
+# Browser dashboard (optional; `streamlit run dashboard.py`)
+streamlit>=1.32.0
+
+# Data manipulation
+pandas>=2.1.0
+numpy>=1.26.0
+
+# Technical analysis indicators (RSI, EMA)
+ta>=0.11.0
+
+# Environment loading
+python-dotenv>=1.0.0
+
+# Periodic task runner
+schedule>=1.2.0
