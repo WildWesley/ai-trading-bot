@@ -1,0 +1,16 @@
+[Unit]
+Description=AI Trading Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/ai-trading-bot/trading-bot
+ExecStart=%h/ai-trading-bot/trading-bot/venv/bin/python -m bot.main --headless
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
