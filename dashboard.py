@@ -28,6 +28,7 @@ import streamlit as st
 
 from bot import algorithm, config
 from bot.alpaca_client import is_crypto_symbol
+from bot.analytics import pair_round_trips
 from bot.database import Database
 
 st.set_page_config(page_title="AI Trading Bot", page_icon="📈", layout="wide")
@@ -39,6 +40,18 @@ st.set_page_config(page_title="AI Trading Bot", page_icon="📈", layout="wide")
 @st.cache_resource
 def get_db() -> Database:
     return Database(config.DB_PATH)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_bars(_client: Any, symbol: str, timeframe: str, limit: int):
+    """Cache chart bars briefly so repeat views / tab switches don't refetch.
+
+    ``_client`` is underscore-prefixed so Streamlit doesn't try to hash it; the
+    cache key is (symbol, timeframe, limit). The cache lives in the long-running
+    dashboard server, so once any visit warms it, later visits load instantly.
+    The "Refresh chart" button clears it on demand.
+    """
+    return _client.get_bars(symbol, timeframe, limit)
 
 
 @st.cache_resource
@@ -172,6 +185,34 @@ def render_overview() -> None:
         else:
             st.caption("No trades yet — signals are rare by design.")
 
+    st.subheader("Closed round trips")
+    round_trips = pair_round_trips(db.get_trades(limit=500))
+    if round_trips:
+        rt_df = pd.DataFrame(round_trips)[
+            ["symbol", "qty", "entry_price", "exit_price", "pnl", "pnl_pct",
+             "entry_time", "exit_time"]
+        ]
+        st.dataframe(
+            rt_df,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "entry_price": st.column_config.NumberColumn(
+                    "Bought @", format="$%.2f"
+                ),
+                "exit_price": st.column_config.NumberColumn(
+                    "Sold @", format="$%.2f"
+                ),
+                "pnl": st.column_config.NumberColumn("P&L $", format="$%.2f"),
+                "pnl_pct": st.column_config.NumberColumn("P&L %", format="%.2f%%"),
+            },
+        )
+    else:
+        st.caption(
+            "No closed round trips yet — each appears here once a buy is later "
+            "sold, pairing the entry and exit price with the P&L."
+        )
+
     st.subheader("Latest AI commentary")
     commentary = db.get_latest_commentary()
     st.write(commentary or "_No AI commentary yet (needs an Anthropic API key)._")
@@ -287,7 +328,8 @@ def render_chart() -> None:
 
     btn_col, info_col = st.columns([1, 4])
     with btn_col:
-        st.button("🔄 Refresh chart", key="chart_refresh", width="stretch")
+        if st.button("🔄 Refresh chart", key="chart_refresh", width="stretch"):
+            _cached_bars.clear()  # force a fresh fetch past the cache TTL
     with info_col:
         st.caption(
             f"EMA{config.EMA_FAST_PERIOD} ≈ "
@@ -303,7 +345,7 @@ def render_chart() -> None:
     # recent ``display_bars``.
     warmup_bars = 3 * max(config.EMA_SLOW_PERIOD, config.RSI_PERIOD)
     try:
-        bars = client.get_bars(symbol, tf_str, display_bars + warmup_bars)
+        bars = _cached_bars(client, symbol, tf_str, display_bars + warmup_bars)
     except Exception as exc:  # noqa: BLE001
         st.error(f"Could not fetch bars for {symbol}: {exc}")
         return
