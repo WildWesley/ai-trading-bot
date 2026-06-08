@@ -202,15 +202,15 @@ def render_watchlist() -> None:
         return
 
     now = datetime.now().strftime("%H:%M:%S")
+    # One batched request per asset class for the whole watchlist, instead of a
+    # per-symbol call — turns ~100 sequential round-trips into ~2 (fast on a Pi).
+    try:
+        prices = client.get_latest_prices(config.WATCHLIST)
+    except Exception:  # noqa: BLE001 - a failed fetch shouldn't blank the table
+        prices = {}
     rows: list[dict[str, Any]] = []
     for symbol in config.WATCHLIST:
-        price: float | None
-        try:
-            price = client.get_latest_price(symbol)
-            if not price:  # 0.0 or None => treat as unavailable
-                price = None
-        except Exception:  # noqa: BLE001 - one bad symbol shouldn't blank the table
-            price = None
+        price = prices.get(symbol) or None  # 0.0 / missing => unavailable
         rows.append(
             {
                 "Symbol": symbol,

@@ -379,9 +379,64 @@ class AlpacaClient:
             return trade
         return self._latest_bar_close(symbol)
 
+    def get_latest_prices(self, symbols: list[str]) -> dict[str, float]:
+        """Return ``{symbol: price}`` for many symbols using batched requests.
+
+        Splits ``symbols`` into stocks vs crypto (separate endpoints) and makes
+        one multi-symbol latest-quote request per group, computing the mid-price
+        for each. Symbols with no usable quote come back as ``0.0``. This is the
+        dashboard's fast path: ~2 requests for the whole watchlist instead of
+        one ``get_latest_price`` call per symbol. Display only — the trader's
+        order sizing still uses ``get_latest_price``.
+        """
+        prices: dict[str, float] = {s: 0.0 for s in symbols}
+        stocks = [s for s in symbols if not is_crypto_symbol(s)]
+        cryptos = [s for s in symbols if is_crypto_symbol(s)]
+
+        if stocks:
+            try:
+                req = StockLatestQuoteRequest(symbol_or_symbols=stocks)
+                res = _with_backoff(
+                    lambda: self._data.get_stock_latest_quote(req),
+                    what="get_stock_latest_quote(batch)",
+                )
+                for sym in stocks:
+                    prices[sym] = self._mid_from_quote(
+                        res.get(sym) if isinstance(res, dict) else None
+                    )
+            except AlpacaClientError:
+                pass  # leave at 0.0; one bad batch shouldn't blank the rest
+
+        if cryptos:
+            try:
+                req = CryptoLatestQuoteRequest(symbol_or_symbols=cryptos)
+                res = _with_backoff(
+                    lambda: self._crypto_data.get_crypto_latest_quote(req),
+                    what="get_crypto_latest_quote(batch)",
+                )
+                for sym in cryptos:
+                    prices[sym] = self._mid_from_quote(
+                        res.get(sym) if isinstance(res, dict) else None
+                    )
+            except AlpacaClientError:
+                pass
+
+        return prices
+
     @staticmethod
     def _pick(result: Any, symbol: str) -> Any:
         return result.get(symbol) if isinstance(result, dict) else result
+
+    @staticmethod
+    def _mid_from_quote(quote: Any) -> float:
+        """Mid-price from a quote object (bid/ask), or 0.0 if unavailable."""
+        if quote is None:
+            return 0.0
+        bid = _to_float(getattr(quote, "bid_price", 0))
+        ask = _to_float(getattr(quote, "ask_price", 0))
+        if bid > 0 and ask > 0:
+            return (bid + ask) / 2.0
+        return ask if ask > 0 else bid
 
     def _latest_quote_mid(self, symbol: str) -> float:
         """Mid-price of the latest quote, or 0.0 if unavailable."""
@@ -400,12 +455,7 @@ class AlpacaClient:
                 )
         except AlpacaClientError:
             return 0.0
-        quote = self._pick(res, symbol)
-        bid = _to_float(getattr(quote, "bid_price", 0))
-        ask = _to_float(getattr(quote, "ask_price", 0))
-        if bid > 0 and ask > 0:
-            return (bid + ask) / 2.0
-        return ask if ask > 0 else bid
+        return self._mid_from_quote(self._pick(res, symbol))
 
     def _latest_trade_price(self, symbol: str) -> float:
         """Price of the latest trade, or 0.0 if unavailable."""
