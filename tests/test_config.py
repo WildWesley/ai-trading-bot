@@ -34,9 +34,12 @@ def test_interval_default_is_five_minutes(config_defaults):
     assert config_defaults.TRADE_INTERVAL_SECONDS == 300
 
 
-def test_watchlist_has_100_symbols(config_defaults):
-    assert len(config_defaults.WATCHLIST) == 100
-    crypto = [s for s in config_defaults.WATCHLIST if "/" in s]
-    assert len(crypto) == 7
-    assert "BTC/USD" in config_defaults.WATCHLIST
-    assert "DOGE/USD" not in config_defaults.WATCHLIST
+def test_watchlist_default_symbol_counts(config_defaults):
+    watchlist = config_defaults.WATCHLIST
+    assert len(watchlist) == 155
+    assert len(watchlist) == len(set(watchlist))  # no duplicates
+    crypto = [s for s in watchlist if "/" in s]
+    assert len(crypto) == 12
+    assert "BTC/USD" in watchlist
+    assert "AAVE/USD" in watchlist
+    assert "DOGE/USD" not in watchlist

@@ -121,9 +121,21 @@ WATCHLIST: list[str] = _get_list(
         "AMT", "PLD", "EQIX",
         # ETFs
         "SPY", "QQQ", "IWM", "GLD", "TLT", "XLF", "XLE", "XLV",
+        # Expanded coverage — more tech / semis
+        "CSCO", "IBM", "TXN", "AMAT", "LRCX", "ADI", "MRVL", "PANW",
+        "CRWD", "ANET", "DELL", "INTU",
+        # Expanded coverage — more finance
+        "USB", "PNC", "COF", "SPGI", "CME", "ICE", "PGR", "CB",
+        # Expanded coverage — more healthcare
+        "TMO", "DHR", "BMY", "MDT", "SYK", "BSX", "ELV", "CI", "REGN", "ZTS",
+        # Expanded coverage — more consumer
+        "PM", "MO", "MDLZ", "CL", "EL", "DG", "TJX", "CMG", "BKNG", "MAR",
+        # Expanded coverage — more industrials / energy / utilities
+        "MMM", "ETN", "ITW", "NSC", "CSX", "FDX", "MPC", "VLO", "NEE", "SO",
         # Crypto (24/7 — bypass the market-hours guard and trend filter)
         "BTC/USD", "ETH/USD", "SOL/USD", "LTC/USD", "AVAX/USD",
-        "LINK/USD", "UNI/USD",
+        "LINK/USD", "UNI/USD", "AAVE/USD", "BCH/USD", "DOT/USD",
+        "MKR/USD", "CRV/USD",
     ],
 )
 TRADE_INTERVAL_SECONDS: int = _get_int("TRADE_INTERVAL_SECONDS", 300)
