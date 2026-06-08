@@ -355,7 +355,7 @@ def render_chart() -> None:
             x=alt.X(
                 "timestamp:T",
                 title=None,
-                axis=alt.Axis(format=axis_fmt, labelAngle=-40),
+                axis=alt.Axis(format=axis_fmt, labelAngle=0),
             ),
             y=alt.Y("value:Q", title="Price", scale=alt.Scale(zero=False)),
             color=alt.Color(
@@ -383,15 +383,10 @@ def render_chart() -> None:
             .mark_point(shape="triangle-down", size=140, filled=True, color="#e74c3c")
             .encode(x="timestamp:T", y="close:Q")
         )
-    chart = alt.layer(*layers).properties(
-        width="container",
-        height=420,
-        # Fit the whole chart — including the diagonal date labels — inside the
-        # box so the bottom row isn't clipped by Streamlit's fixed-height
-        # container. (Requires dropping .interactive(): Vega ignores "fit"
-        # sizing when pan/zoom scale-binding is enabled.)
-        autosize=alt.AutoSizeParams(type="fit", contains="padding"),
-    )
+    # Horizontal date labels (labelAngle=0 above) — the working RSI chart proves
+    # horizontal time labels render cleanly in this Streamlit/Vega version, while
+    # the old -40° rotation pushed the month below the box and clipped it.
+    chart = alt.layer(*layers).properties(width="container", height=420).interactive()
     # theme=None: render the Altair spec as-is instead of letting Streamlit
     # reskin it. Streamlit's default theme on a custom (layered, temporal-axis)
     # spec broke the x-axis labels after the Streamlit 1.58 / Altair 6 upgrade.
