@@ -384,7 +384,10 @@ def render_chart() -> None:
             .encode(x="timestamp:T", y="close:Q")
         )
     chart = alt.layer(*layers).properties(width="container", height=360).interactive()
-    st.altair_chart(chart)
+    # theme=None: render the Altair spec as-is instead of letting Streamlit
+    # reskin it. Streamlit's default theme on a custom (layered, temporal-axis)
+    # spec broke the x-axis labels after the Streamlit 1.58 / Altair 6 upgrade.
+    st.altair_chart(chart, theme=None)
 
     # What's actually loaded: bar count and the span the bars cover.
     span_start = pd.to_datetime(ind.index[0])
