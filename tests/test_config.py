@@ -24,8 +24,8 @@ def config_defaults(monkeypatch):
 
 
 def test_new_trend_and_market_constants_exist():
-    assert config.EMA_TREND_FAST_PERIOD == 50
-    assert config.EMA_TREND_SLOW_PERIOD == 200
+    assert config.EMA_TREND_FAST_PERIOD == 20
+    assert config.EMA_TREND_SLOW_PERIOD == 50
     assert config.TREND_LOOKBACK_BARS == 365
     assert config.MARKET_BLACKOUT_MINUTES == 15
 

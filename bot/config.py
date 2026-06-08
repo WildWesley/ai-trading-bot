@@ -140,10 +140,12 @@ EMA_SLOW_PERIOD: int = 21
 RSI_BUY_THRESHOLD: float = 35.0
 RSI_SELL_THRESHOLD: float = 65.0
 
-# Daily trend filter (golden cross on daily bars). A BUY signal on a stock is
-# skipped unless its medium-term trend is above its long-term trend.
-EMA_TREND_FAST_PERIOD: int = 50    # daily EMA, "golden cross" fast leg
-EMA_TREND_SLOW_PERIOD: int = 200   # daily EMA, "golden cross" slow leg
+# Daily trend filter. A BUY on a stock is skipped unless its faster daily EMA
+# is above its slower daily EMA. Tuned to a medium-term (20/50) trend rather
+# than the slower year-long golden cross (50/200): more responsive and yields
+# more setups, a better fit for this short-term, intraday style.
+EMA_TREND_FAST_PERIOD: int = 20    # daily EMA, medium-term trend fast leg
+EMA_TREND_SLOW_PERIOD: int = 50    # daily EMA, medium-term trend slow leg
 TREND_LOOKBACK_BARS: int = 365     # daily bars to fetch for the trend check
 
 # Market-hours guard. Stocks are not traded in the first/last N minutes of the
