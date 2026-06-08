@@ -73,8 +73,11 @@ TUI (main thread) ─► reads database + alpaca_client every 5s ─► renders
 
 Two-timeframe strategy:
 
-**Long-term filter (daily bars, 365-day lookback):** a stock is only eligible
-for BUYs when EMA(50) > EMA(200) (golden cross). Computed once per day and
+**Trend filter (daily bars):** a stock is only eligible for BUYs when its
+faster daily EMA is above its slower one — currently EMA(20) > EMA(50), a
+medium-term trend tuned for this short-term style (looser than the classic
+50/200 golden cross, so more setups fire). Periods are config constants
+(`EMA_TREND_FAST_PERIOD` / `EMA_TREND_SLOW_PERIOD`). Computed once per day and
 cached per symbol in the trader (`_warm_trend_cache_if_needed`). Crypto bypasses
 this filter. See `algorithm.compute_daily_trend`.
 

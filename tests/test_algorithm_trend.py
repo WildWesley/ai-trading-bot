@@ -1,8 +1,8 @@
-"""Tests for the daily golden-cross trend classifier."""
+"""Tests for the daily-trend classifier (fast vs slow daily EMA)."""
 
 import pandas as pd
 
-from bot import algorithm
+from bot import algorithm, config
 from tests.conftest import falling_closes, make_bars, rising_closes
 
 
@@ -17,7 +17,8 @@ def test_downtrend_returns_down():
 
 
 def test_insufficient_data_returns_unknown():
-    bars = make_bars(rising_closes(50))  # < 200 bars
+    # Clearly fewer bars than the slow EMA period needs.
+    bars = make_bars(rising_closes(config.EMA_TREND_SLOW_PERIOD // 2))
     assert algorithm.compute_daily_trend(bars) == "unknown"
 
 
