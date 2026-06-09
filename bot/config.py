@@ -132,10 +132,29 @@ WATCHLIST: list[str] = _get_list(
         "PM", "MO", "MDLZ", "CL", "EL", "DG", "TJX", "CMG", "BKNG", "MAR",
         # Expanded coverage — more industrials / energy / utilities
         "MMM", "ETN", "ITW", "NSC", "CSX", "FDX", "MPC", "VLO", "NEE", "SO",
+        # Wave 2 — more tech / semis / software
+        "GOOG", "KLAC", "NXPI", "MCHP", "ON", "MPWR", "SWKS", "TER", "ASML",
+        "ARM", "SMCI", "WDC", "STX", "HPE", "JNPR", "FFIV", "AKAM", "CDW",
+        "ZS", "FTNT", "NET", "OKTA", "TWLO", "DOCU", "HUBS",
+        # Wave 2 — more finance
+        "MET", "PRU", "AON", "MMC", "TRV", "ALL", "AFL", "FIS", "GPN", "DFS",
+        "SYF", "FITB", "HBAN", "NTRS", "BK",
+        # Wave 2 — more healthcare
+        "BIIB", "MRNA", "IDXX", "IQV", "GEHC", "RMD", "DXCM", "ZBH", "BDX",
+        "HUM", "CNC", "MCK",
+        # Wave 2 — more consumer
+        "KHC", "GIS", "HSY", "STZ", "KDP", "KR", "SYY", "MNST", "CHD", "CLX",
+        "ORLY", "AZO", "ULTA", "LULU", "YUM",
+        # Wave 2 — more industrials / energy / utilities
+        "UNP", "GD", "NOC", "ROK", "PCAR", "CMI", "URI", "FAST", "PAYX",
+        "ADP", "WM", "CTAS", "GWW", "OKE", "D",
+        # Wave 2 — more ETFs
+        "DIA", "VTI", "XLK", "XLY", "XLI", "XLP", "XLU", "SMH",
         # Crypto (24/7 — bypass the market-hours guard and trend filter)
         "BTC/USD", "ETH/USD", "SOL/USD", "LTC/USD", "AVAX/USD",
         "LINK/USD", "UNI/USD", "AAVE/USD", "BCH/USD", "DOT/USD",
-        "MKR/USD", "CRV/USD",
+        "MKR/USD", "CRV/USD", "XTZ/USD", "GRT/USD", "SUSHI/USD",
+        "YFI/USD", "BAT/USD",
     ],
 )
 TRADE_INTERVAL_SECONDS: int = _get_int("TRADE_INTERVAL_SECONDS", 300)
