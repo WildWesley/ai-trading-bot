@@ -116,7 +116,7 @@ WATCHLIST: list[str] = _get_list(
         # Auto
         "F", "GM",
         # Telecom / media
-        "DIS", "CMCSA", "T", "VZ",
+        "DIS", "CMCSA", "T", "VZ", "TMUS",
         # REITs
         "AMT", "PLD", "EQIX",
         # ETFs
@@ -153,7 +153,7 @@ WATCHLIST: list[str] = _get_list(
         # Crypto (24/7 — bypass the market-hours guard and trend filter)
         "BTC/USD", "ETH/USD", "SOL/USD", "LTC/USD", "AVAX/USD",
         "LINK/USD", "UNI/USD", "AAVE/USD", "BCH/USD", "DOT/USD",
-        "MKR/USD", "CRV/USD", "XTZ/USD", "GRT/USD", "SUSHI/USD",
+        "CRV/USD", "XTZ/USD", "GRT/USD", "SUSHI/USD",
         "YFI/USD", "BAT/USD",
     ],
 )

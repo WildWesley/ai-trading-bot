@@ -39,7 +39,9 @@ def test_watchlist_default_symbol_counts(config_defaults):
     assert len(watchlist) == 250
     assert len(watchlist) == len(set(watchlist))  # no duplicates
     crypto = [s for s in watchlist if "/" in s]
-    assert len(crypto) == 17
+    assert len(crypto) == 16
     assert "BTC/USD" in watchlist
     assert "AAVE/USD" in watchlist
     assert "DOGE/USD" not in watchlist
+    assert "MKR/USD" not in watchlist  # dropped: not on Alpaca's feed
+    assert "TMUS" in watchlist
