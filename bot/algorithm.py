@@ -251,16 +251,20 @@ def decide(
 
     crossed_up = ema_fast_prev <= ema_slow_prev and ema_fast > ema_slow
     crossed_down = ema_fast_prev >= ema_slow_prev and ema_fast < ema_slow
+    # BUY uses the EMA *state* (fast above slow = short-term uptrend) rather than
+    # a fresh crossover *event*, so an oversold pullback in an up-trending name
+    # qualifies without having to land on the exact crossover bar.
+    momentum_up = ema_fast > ema_slow
 
     common = dict(rsi=rsi, ema_fast=ema_fast, ema_slow=ema_slow, price=price)
 
-    if rsi < buy_rsi and crossed_up:
+    if rsi < buy_rsi and momentum_up:
         return _result(
             "BUY",
             reason=(
-                f"{symbol}: BUY — RSI {rsi:.1f} < {buy_rsi:.0f} (oversold) and "
-                f"EMA{fast_period} ({ema_fast:.2f}) crossed above "
-                f"EMA{slow_period} ({ema_slow:.2f})."
+                f"{symbol}: BUY — RSI {rsi:.1f} < {buy_rsi:.0f} (pullback) and "
+                f"EMA{fast_period} ({ema_fast:.2f}) above "
+                f"EMA{slow_period} ({ema_slow:.2f}) (short-term uptrend)."
             ),
             **common,
         )

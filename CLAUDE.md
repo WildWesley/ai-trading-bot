@@ -82,10 +82,13 @@ cached per symbol in the trader (`_warm_trend_cache_if_needed`). Crypto bypasses
 this filter. See `algorithm.compute_daily_trend`.
 
 **Short-term timing (5-minute candles, last 50 bars):**
-- **BUY**: `RSI(14) < 35` **and** `EMA(9)` crosses above `EMA(21)` **and** the
-  daily trend is not "down"
+- **BUY**: `RSI(14) < 45` **and** `EMA(9)` is **above** `EMA(21)` (short-term
+  uptrend *state*, not a fresh cross) **and** the daily trend is not "down"
 - **SELL**: `RSI(14) > 65` **and** `EMA(9)` crosses below `EMA(21)`
 - **HOLD**: otherwise
+
+The BUY rule was loosened (RSI 35→45; EMA state instead of a crossover event)
+because the original triple-confluence fired far too rarely to generate data.
 
 **Market-hours guard (stocks only):** no new stock trades in the first/last 15
 minutes of the session (`MARKET_BLACKOUT_MINUTES`) or while the market is
