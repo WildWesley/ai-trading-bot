@@ -85,6 +85,9 @@ class Trader:
         # Per-symbol "can this stock be bought by a fractional/notional dollar
         # amount?" cache, so a BUY doesn't re-query the asset every cycle.
         self._fractionable_cache: dict[str, bool] = {}
+        # Open positions snapshotted once per cycle (symbol -> position dict),
+        # so we don't make a per-symbol position lookup across the watchlist.
+        self._positions: dict[str, dict] = {}
 
     # -- Public API ------------------------------------------------------
     def run_cycle(self) -> None:
@@ -93,11 +96,28 @@ class Trader:
         self.log("info", f"Cycle {self.cycle_count} started.")
         self._warm_trend_cache_if_needed()
         self._update_market_state()
-        for symbol in self.watchlist:
-            try:
-                self._process_symbol(symbol)
-            except Exception as exc:  # noqa: BLE001 - isolate per-symbol faults
-                self.log("error", f"{symbol}: {exc}")
+        # Snapshot all open positions in ONE call, then look each symbol up
+        # locally — far fewer API calls than a per-symbol position lookup. If
+        # this fails we skip trading this cycle rather than risk treating held
+        # positions as flat and double-buying them.
+        try:
+            self._positions = {
+                str(p.get("symbol")): p for p in self.client.get_positions()
+            }
+            positions_ok = True
+        except Exception as exc:  # noqa: BLE001 - degrade safely
+            self.log(
+                "error",
+                f"could not fetch positions; skipping trades this cycle: {exc}",
+            )
+            positions_ok = False
+
+        if positions_ok:
+            for symbol in self.watchlist:
+                try:
+                    self._process_symbol(symbol)
+                except Exception as exc:  # noqa: BLE001 - isolate per-symbol faults
+                    self.log("error", f"{symbol}: {exc}")
         try:
             self._record_snapshot()
         except Exception as exc:  # noqa: BLE001
@@ -290,7 +310,7 @@ class Trader:
         rsi_txt = f"RSI {rsi:.0f}" if isinstance(rsi, (int, float)) else "RSI n/a"
         self.log("debug", f"{symbol}: {signal} ({rsi_txt}).")
 
-        position = self.client.get_position(symbol)
+        position = self._positions.get(symbol)
         has_position = position is not None and float(
             position.get("qty", 0)
         ) > 0
