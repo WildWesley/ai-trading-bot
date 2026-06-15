@@ -168,7 +168,7 @@ BAR_TIMEFRAME_MINUTES: int = 5   # 5-minute candles
 RSI_PERIOD: int = 14
 EMA_FAST_PERIOD: int = 9
 EMA_SLOW_PERIOD: int = 21
-RSI_BUY_THRESHOLD: float = 45.0   # buy moderate pullbacks, not just deep dips
+RSI_BUY_THRESHOLD: float = 35.0   # genuinely oversold (not just below midline)
 RSI_SELL_THRESHOLD: float = 65.0
 
 # Daily trend filter. A BUY on a stock is skipped unless its faster daily EMA
@@ -178,6 +178,12 @@ RSI_SELL_THRESHOLD: float = 65.0
 EMA_TREND_FAST_PERIOD: int = 20    # daily EMA, medium-term trend fast leg
 EMA_TREND_SLOW_PERIOD: int = 50    # daily EMA, medium-term trend slow leg
 TREND_LOOKBACK_BARS: int = 365     # daily bars to fetch for the trend check
+
+# Market-regime filter. No long *stock* trades while this proxy symbol's own
+# daily trend is "down" — i.e., don't fight a falling market. The proxy must be
+# in WATCHLIST so its trend gets computed. Empty string disables the filter.
+# Crypto is exempt (it doesn't track the stock market).
+MARKET_REGIME_SYMBOL: str = "SPY"
 
 # Market-hours guard. Stocks are not traded in the first/last N minutes of the
 # session; all stock positions are flattened before close. Crypto is exempt.
