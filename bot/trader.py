@@ -317,6 +317,16 @@ class Trader:
 
         if signal == "BUY" and not has_position:
             if not is_crypto_symbol(symbol):
+                # Market-regime filter: don't go long ANY stock while the broad
+                # market proxy (SPY) is itself in a daily downtrend. Only blocks
+                # on "down"; "up"/"unknown"/absent all allow (fail open).
+                regime = config.MARKET_REGIME_SYMBOL
+                if regime and self._trend_cache.get(regime) == "down":
+                    self.log(
+                        "debug",
+                        f"{symbol}: BUY skipped — market ({regime}) trend down.",
+                    )
+                    return
                 trend = self._trend_cache.get(symbol, "unknown")
                 if trend == "down":
                     self.log(

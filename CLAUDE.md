@@ -82,13 +82,22 @@ cached per symbol in the trader (`_warm_trend_cache_if_needed`). Crypto bypasses
 this filter. See `algorithm.compute_daily_trend`.
 
 **Short-term timing (5-minute candles, last 50 bars):**
-- **BUY**: `RSI(14) < 45` **and** `EMA(9)` is **above** `EMA(21)` (short-term
-  uptrend *state*, not a fresh cross) **and** the daily trend is not "down"
+- **BUY**: `RSI(14) < 35` (oversold) **and** `EMA(9)` is **above** `EMA(21)`
+  (short-term uptrend *state*, not a fresh cross) **and** the daily trend is not
+  "down" **and** the market regime is not "down" (see below)
 - **SELL**: `RSI(14) > 65` **and** `EMA(9)` crosses below `EMA(21)`
 - **HOLD**: otherwise
 
-The BUY rule was loosened (RSI 35→45; EMA state instead of a crossover event)
-because the original triple-confluence fired far too rarely to generate data.
+History: the original BUY needed RSI<35 + a fresh crossover *event*, which fired
+almost never. We loosened to RSI<45 + EMA *state*, which over-traded badly (~30%
+win rate in a falling market). Settled on RSI<35 + EMA *state* + the regime
+filter below.
+
+**Market-regime filter (stocks only, `MARKET_REGIME_SYMBOL`, default "SPY"):**
+no long stock buys while the broad-market proxy's own daily trend is "down" —
+i.e. don't go long into a falling market. Reads the proxy's verdict from the
+daily trend cache (SPY must be in the watchlist). Crypto is exempt. See the BUY
+guard in `trader._process_symbol`.
 
 **Market-hours guard (stocks only):** no new stock trades in the first/last 15
 minutes of the session (`MARKET_BLACKOUT_MINUTES`) or while the market is
