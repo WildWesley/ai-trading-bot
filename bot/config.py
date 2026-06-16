@@ -168,7 +168,7 @@ BAR_TIMEFRAME_MINUTES: int = 5   # 5-minute candles
 RSI_PERIOD: int = 14
 EMA_FAST_PERIOD: int = 9
 EMA_SLOW_PERIOD: int = 21
-RSI_BUY_THRESHOLD: float = 35.0   # genuinely oversold (not just below midline)
+RSI_BUY_THRESHOLD: float = 45.0   # buy pullbacks; regime filter guards downtrends
 RSI_SELL_THRESHOLD: float = 65.0
 
 # Daily trend filter. A BUY on a stock is skipped unless its faster daily EMA

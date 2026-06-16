@@ -82,22 +82,32 @@ cached per symbol in the trader (`_warm_trend_cache_if_needed`). Crypto bypasses
 this filter. See `algorithm.compute_daily_trend`.
 
 **Short-term timing (5-minute candles, last 50 bars):**
-- **BUY**: `RSI(14) < 35` (oversold) **and** `EMA(9)` is **above** `EMA(21)`
+- **BUY**: `RSI(14) < 45` (pullback) **and** `EMA(9)` is **above** `EMA(21)`
   (short-term uptrend *state*, not a fresh cross) **and** the daily trend is not
   "down" **and** the market regime is not "down" (see below)
 - **SELL**: `RSI(14) > 65` **and** `EMA(9)` crosses below `EMA(21)`
 - **HOLD**: otherwise
 
 History: the original BUY needed RSI<35 + a fresh crossover *event*, which fired
-almost never. We loosened to RSI<45 + EMA *state*, which over-traded badly (~30%
-win rate in a falling market). Settled on RSI<35 + EMA *state* + the regime
-filter below.
+almost never. We briefly tried RSI<35 + EMA *state*, but backtesting on real
+trade data showed RSI<35 (and even <40) fired on <1% of setups — near-zero
+trading — while not improving the win rate. Settled on RSI<45 + EMA *state*,
+relying on the intraday market-regime filter below to guard downtrends rather
+than choking entries with a tight RSI.
 
 **Market-regime filter (stocks only, `MARKET_REGIME_SYMBOL`, default "SPY"):**
-no long stock buys while the broad-market proxy's own daily trend is "down" —
-i.e. don't go long into a falling market. Reads the proxy's verdict from the
-daily trend cache (SPY must be in the watchlist). Crypto is exempt. See the BUY
-guard in `trader._process_symbol`.
+no long stock buys while the broad-market proxy is **"red" intraday** — trading
+*below its prior daily close*. This is an intraday check (live proxy price vs its
+last settled daily close), so it reacts within the session to sharp broad-market
+drops, unlike the slow daily-EMA trend. Recomputed once per cycle in
+`trader._update_market_regime` (the proxy's prior close is cached per day); the
+per-symbol BUY guard in `trader._process_symbol` just reads the resulting
+`_market_regime_down` flag. The proxy does **not** need to be in the watchlist —
+the trader fetches its bars/price directly. Crypto is exempt, and any missing
+data or error **fails open** (trading allowed). Chosen over the earlier
+daily-trend version after backtesting regime gates on real trade data: a daily
+gate lagged the 2-day drops that caused the losses, while the intraday red-vs-
+close gate caught them without strangling stock participation on up days.
 
 **Market-hours guard (stocks only):** no new stock trades in the first/last 15
 minutes of the session (`MARKET_BLACKOUT_MINUTES`) or while the market is

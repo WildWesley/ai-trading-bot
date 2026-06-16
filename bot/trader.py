@@ -73,6 +73,13 @@ class Trader:
         # per calendar day. Crypto entries stay "unknown" and bypass the filter.
         self._trend_cache: dict[str, str] = {}
         self._trend_cache_date: str | None = None
+        # Market-regime gate. Recomputed each cycle: True == the market proxy
+        # (MARKET_REGIME_SYMBOL) is trading below its prior daily close ("red"
+        # intraday), so new long stock entries pause. Defaults False (allow).
+        # The proxy's prior close is cached per calendar day.
+        self._market_regime_down: bool = False
+        self._regime_prior_close: float | None = None
+        self._regime_prior_close_date: str | None = None
         # Market-state flag, set each cycle by the market guard (a later task).
         # Default True so trading works before the first market check runs.
         self._stock_trading_allowed: bool = True
@@ -96,6 +103,7 @@ class Trader:
         self.log("info", f"Cycle {self.cycle_count} started.")
         self._warm_trend_cache_if_needed()
         self._update_market_state()
+        self._update_market_regime()
         # Snapshot all open positions in ONE call, then look each symbol up
         # locally — far fewer API calls than a per-symbol position lookup. If
         # this fails we skip trading this cycle rather than risk treating held
@@ -145,6 +153,60 @@ class Trader:
     def recent_events(self, limit: int = 20) -> list[dict[str, str]]:
         with self._lock:
             return list(self.events)[-limit:][::-1]
+
+    # -- Market regime ---------------------------------------------------
+    def _prior_daily_close(self, symbol: str) -> float | None:
+        """Most recent *settled* daily close for ``symbol`` — i.e. excluding
+        today's still-forming daily bar. None if no usable data.
+        """
+        bars = self.client.get_bars(symbol, "1Day", limit=5)
+        if bars is None or bars.empty or "close" not in bars.columns:
+            return None
+        today = datetime.now(timezone.utc).date()
+        closes = [
+            float(c)
+            for ts, c in zip(bars.index, bars["close"])
+            if ts.date() < today
+        ]
+        return closes[-1] if closes else None
+
+    def _update_market_regime(self) -> None:
+        """Set ``self._market_regime_down`` from an intraday "red day" check on
+        the market proxy (``MARKET_REGIME_SYMBOL``, default SPY): pause new long
+        stock entries while the proxy trades *below its prior daily close*.
+
+        Unlike the slow daily-EMA trend, this reacts within the session, which
+        is what catches sharp broad-market drops. Crypto is unaffected (the gate
+        is only consulted for stocks). Fails OPEN — any missing data or error
+        leaves trading allowed. The proxy's prior close is cached per day.
+        """
+        self._market_regime_down = False  # default: allow (fail open)
+        regime = config.MARKET_REGIME_SYMBOL
+        if not regime or not self._stock_trading_allowed:
+            return
+        try:
+            today = datetime.now(timezone.utc).date().isoformat()
+            if self._regime_prior_close_date != today:
+                self._regime_prior_close = self._prior_daily_close(regime)
+                self._regime_prior_close_date = today
+            prior_close = self._regime_prior_close
+            if prior_close is None:
+                return
+            live = self.client.get_latest_price(regime)
+            if not live or live <= 0:
+                return
+            if live < prior_close:
+                self._market_regime_down = True
+                pct = (live / prior_close - 1) * 100
+                self.log(
+                    "info",
+                    f"Market regime risk-off: {regime} {live:.2f} below prior "
+                    f"close {prior_close:.2f} ({pct:+.2f}%); pausing stock buys.",
+                )
+        except Exception as exc:  # noqa: BLE001 - never crash the cycle
+            self.log(
+                "error", f"market-regime check failed (allowing trades): {exc}"
+            )
 
     # -- Market hours ----------------------------------------------------
     def _update_market_state(self) -> None:
@@ -318,13 +380,14 @@ class Trader:
         if signal == "BUY" and not has_position:
             if not is_crypto_symbol(symbol):
                 # Market-regime filter: don't go long ANY stock while the broad
-                # market proxy (SPY) is itself in a daily downtrend. Only blocks
-                # on "down"; "up"/"unknown"/absent all allow (fail open).
-                regime = config.MARKET_REGIME_SYMBOL
-                if regime and self._trend_cache.get(regime) == "down":
+                # market proxy (SPY) is "red" intraday — trading below its prior
+                # daily close. Recomputed each cycle in _update_market_regime;
+                # missing data / errors fail open (allow). See that method.
+                if self._market_regime_down:
                     self.log(
                         "debug",
-                        f"{symbol}: BUY skipped — market ({regime}) trend down.",
+                        f"{symbol}: BUY skipped — market "
+                        f"({config.MARKET_REGIME_SYMBOL}) red intraday.",
                     )
                     return
                 trend = self._trend_cache.get(symbol, "unknown")
