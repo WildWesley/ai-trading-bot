@@ -7,7 +7,11 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=%REPO%
 ExecStart=%REPO%/venv/bin/python -m bot.main --headless
-Restart=on-failure
+# Restart even on a clean (status 0) exit: at boot the bot can self-exit when
+# DNS/network isn't ready yet (it can't reach Alpaca). on-failure would NOT
+# retry that, leaving the bot down until the next reboot. A manual
+# `systemctl stop` still stops it for good (Restart only fires on self-exit).
+Restart=always
 RestartSec=30
 StandardOutput=journal
 StandardError=journal
