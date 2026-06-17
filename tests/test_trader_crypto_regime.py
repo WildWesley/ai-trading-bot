@@ -9,9 +9,21 @@ gate reads ``Trader._crypto_regime_down``, recomputed each cycle by
 check runs even when the stock market is closed — crypto trades 24/7.
 """
 
+import pytest
+
 import bot.config as config
 from bot.trader import Trader
 from tests.conftest import make_bars
+
+
+@pytest.fixture(autouse=True)
+def _enable_crypto_gates(monkeypatch):
+    """Exercise the crypto-regime gate LOGIC. The gates ship disabled by
+    default (2026-06-17 — backtested as harmful in the current BTC downtrend),
+    so enable them for these tests; the toggle-off tests re-disable explicitly.
+    """
+    monkeypatch.setattr(config, "CRYPTO_REGIME_USE_TREND", True)
+    monkeypatch.setattr(config, "CRYPTO_REGIME_USE_INTRADAY", True)
 
 
 def _trader(

@@ -194,9 +194,14 @@ MARKET_REGIME_SYMBOL: str = "SPY"
 # The trend gate needs the proxy in WATCHLIST (its trend is computed in the
 # warm-up loop); the intraday gate fetches the proxy directly. Any missing data
 # or error fails OPEN (crypto trading allowed).
+# NOTE (2026-06-17): both gates DISABLED after backtesting. BTC (and every alt)
+# has been in a daily EMA20<EMA50 downtrend the whole window, so the trend gate
+# blocks 100% of crypto buys — a kill-switch, not a filter — and the intraday
+# gate blocked the better-performing dip entries (crypto here is mean-reverting:
+# buying weakness is the edge). Re-enable only if a BTC-up regime changes that.
 CRYPTO_REGIME_SYMBOL: str = "BTC/USD"
-CRYPTO_REGIME_USE_TREND: bool = True
-CRYPTO_REGIME_USE_INTRADAY: bool = True
+CRYPTO_REGIME_USE_TREND: bool = False
+CRYPTO_REGIME_USE_INTRADAY: bool = False
 
 # Market-hours guard. Stocks are not traded in the first/last N minutes of the
 # session; all stock positions are flattened before close. Crypto is exempt.

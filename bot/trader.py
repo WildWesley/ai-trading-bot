@@ -103,6 +103,16 @@ class Trader:
         # Open positions snapshotted once per cycle (symbol -> position dict),
         # so we don't make a per-symbol position lookup across the watchlist.
         self._positions: dict[str, dict] = {}
+        # Alpaca reports crypto positions slashless ("BTCUSD"), but the
+        # watchlist and order path use the canonical "BTC/USD". Without a
+        # mapping the per-symbol position lookup in _process_symbol never
+        # matches, so the bot is blind to crypto it already holds: it re-buys
+        # held coins (runaway accumulation) and can never match a sell. Map
+        # slashless -> canonical so lookups resolve. Built once; the watchlist
+        # is fixed for the trader's lifetime.
+        self._crypto_position_aliases: dict[str, str] = {
+            s.replace("/", ""): s for s in self.watchlist if "/" in s
+        }
 
     # -- Public API ------------------------------------------------------
     def run_cycle(self) -> None:
@@ -119,7 +129,10 @@ class Trader:
         # positions as flat and double-buying them.
         try:
             self._positions = {
-                str(p.get("symbol")): p for p in self.client.get_positions()
+                self._crypto_position_aliases.get(
+                    str(p.get("symbol")), str(p.get("symbol"))
+                ): p
+                for p in self.client.get_positions()
             }
             positions_ok = True
         except Exception as exc:  # noqa: BLE001 - degrade safely
@@ -483,7 +496,14 @@ class Trader:
                     )
                     return
             self._open_long(symbol, analysis)
-        elif signal == "SELL" and has_position:
+        elif signal == "SELL" and has_position and not is_crypto_symbol(symbol):
+            # NOTE (2026-06-17): crypto signal-driven exits are intentionally
+            # deferred. Now that crypto positions are recognized (alias map),
+            # this branch would otherwise start firing RSI>65 sells on crypto —
+            # but crypto's exit policy is still being designed (today crypto
+            # only exits via the EOD flatten). Hold crypto exits unchanged until
+            # that's decided, so this fix is limited to stopping the runaway
+            # accumulation. See _flatten_stock_positions and the project notes.
             self._close_long(symbol, analysis, position)
         else:
             # Quietly hold; avoid flooding the event log on every HOLD.
