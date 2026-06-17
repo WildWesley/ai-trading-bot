@@ -78,8 +78,9 @@ faster daily EMA is above its slower one — currently EMA(20) > EMA(50), a
 medium-term trend tuned for this short-term style (looser than the classic
 50/200 golden cross, so more setups fire). Periods are config constants
 (`EMA_TREND_FAST_PERIOD` / `EMA_TREND_SLOW_PERIOD`). Computed once per day and
-cached per symbol in the trader (`_warm_trend_cache_if_needed`). Crypto bypasses
-this filter. See `algorithm.compute_daily_trend`.
+cached per symbol in the trader (`_warm_trend_cache_if_needed`). Individual
+crypto symbols bypass this filter (the crypto proxy is the exception — see the
+crypto-regime filter below). See `algorithm.compute_daily_trend`.
 
 **Short-term timing (5-minute candles, last 50 bars):**
 - **BUY**: `RSI(14) < 45` (pullback) **and** `EMA(9)` is **above** `EMA(21)`
@@ -108,6 +109,25 @@ data or error **fails open** (trading allowed). Chosen over the earlier
 daily-trend version after backtesting regime gates on real trade data: a daily
 gate lagged the 2-day drops that caused the losses, while the intraday red-vs-
 close gate caught them without strangling stock participation on up days.
+
+**Crypto-regime filter (crypto only, `CRYPTO_REGIME_SYMBOL`, default "BTC/USD"):**
+the SPY analog for the crypto book. Individual crypto previously bypassed every
+trend guard; now a crypto BUY must clear **two** gates on the BTC proxy, each
+independently toggleable (`CRYPTO_REGIME_USE_TREND` / `CRYPTO_REGIME_USE_INTRADAY`,
+both default on):
+- **Trend gate:** BTC daily `EMA20 > EMA50` (slow, multi-week). Reuses
+  `compute_daily_trend` via the warm-up — so the proxy (and only the proxy) gets
+  its real trend computed instead of "unknown"; it must be in `WATCHLIST`.
+- **Intraday gate:** BTC trading at/above its prior daily **UTC** close (fast,
+  within-session). Recomputed each cycle in `trader._update_crypto_regime` →
+  `_crypto_regime_down`; reuses `_prior_daily_close`. Unlike the stock regime
+  it is **not** gated on market hours (crypto is 24/7). "Prior close" is the
+  midnight-UTC daily boundary, a clock convention, not a real market close.
+
+Both gates **fail open** (missing data / error → trade allowed); empty
+`CRYPTO_REGIME_SYMBOL` disables both. The BUY guard lives in the crypto branch
+of `trader._process_symbol`. Rationale: individual alts are too volatile for
+their own EMA cross, so BTC is used as the shared proxy (like SPY for stocks).
 
 **Market-hours guard (stocks only):** no new stock trades in the first/last 15
 minutes of the session (`MARKET_BLACKOUT_MINUTES`) or while the market is

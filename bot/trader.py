@@ -80,6 +80,14 @@ class Trader:
         self._market_regime_down: bool = False
         self._regime_prior_close: float | None = None
         self._regime_prior_close_date: str | None = None
+        # Crypto-regime gate (the SPY analog for the crypto book). Recomputed
+        # each cycle: True == the crypto proxy (CRYPTO_REGIME_SYMBOL) is trading
+        # below its prior daily (UTC) close, so new long crypto entries pause.
+        # Defaults False (allow). Prior close cached per calendar day. The
+        # daily-EMA20/50 trend gate reuses self._trend_cache (see warm-up).
+        self._crypto_regime_down: bool = False
+        self._crypto_regime_prior_close: float | None = None
+        self._crypto_regime_prior_close_date: str | None = None
         # Market-state flag, set each cycle by the market guard (a later task).
         # Default True so trading works before the first market check runs.
         self._stock_trading_allowed: bool = True
@@ -104,6 +112,7 @@ class Trader:
         self._warm_trend_cache_if_needed()
         self._update_market_state()
         self._update_market_regime()
+        self._update_crypto_regime()
         # Snapshot all open positions in ONE call, then look each symbol up
         # locally — far fewer API calls than a per-symbol position lookup. If
         # this fails we skip trading this cycle rather than risk treating held
@@ -206,6 +215,46 @@ class Trader:
         except Exception as exc:  # noqa: BLE001 - never crash the cycle
             self.log(
                 "error", f"market-regime check failed (allowing trades): {exc}"
+            )
+
+    def _update_crypto_regime(self) -> None:
+        """Set ``self._crypto_regime_down`` from an intraday "red day" check on
+        the crypto proxy (``CRYPTO_REGIME_SYMBOL``, default BTC/USD): pause new
+        long *crypto* entries while the proxy trades *below its prior daily
+        close*. The crypto analog of ``_update_market_regime``.
+
+        Unlike the stock check this is NOT gated on market hours — crypto trades
+        24/7. "Prior close" is the proxy's last settled daily (UTC) candle.
+        Fails OPEN — any missing data or error leaves trading allowed. The
+        proxy's prior close is cached per calendar day.
+        """
+        self._crypto_regime_down = False  # default: allow (fail open)
+        sym = config.CRYPTO_REGIME_SYMBOL
+        if not sym or not config.CRYPTO_REGIME_USE_INTRADAY:
+            return
+        try:
+            today = datetime.now(timezone.utc).date().isoformat()
+            if self._crypto_regime_prior_close_date != today:
+                self._crypto_regime_prior_close = self._prior_daily_close(sym)
+                self._crypto_regime_prior_close_date = today
+            prior_close = self._crypto_regime_prior_close
+            if prior_close is None:
+                return
+            live = self.client.get_latest_price(sym)
+            if not live or live <= 0:
+                return
+            if live < prior_close:
+                self._crypto_regime_down = True
+                pct = (live / prior_close - 1) * 100
+                self.log(
+                    "info",
+                    f"Crypto regime risk-off: {sym} {live:.2f} below prior "
+                    f"close {prior_close:.2f} ({pct:+.2f}%); pausing crypto buys.",
+                )
+        except Exception as exc:  # noqa: BLE001 - never crash the cycle
+            self.log(
+                "error",
+                f"crypto-regime check failed (allowing trades): {exc}",
             )
 
     # -- Market hours ----------------------------------------------------
@@ -333,7 +382,14 @@ class Trader:
         new_cache: dict[str, str] = {}
         total = len(self.watchlist)
         for i, symbol in enumerate(self.watchlist, start=1):
-            if is_crypto_symbol(symbol):
+            # Crypto bypasses the per-symbol trend filter and stays "unknown" —
+            # except the crypto regime proxy, whose trend we DO compute (when the
+            # trend gate is enabled) so it can gate the whole crypto book.
+            is_crypto_proxy = (
+                symbol == config.CRYPTO_REGIME_SYMBOL
+                and config.CRYPTO_REGIME_USE_TREND
+            )
+            if is_crypto_symbol(symbol) and not is_crypto_proxy:
                 new_cache[symbol] = "unknown"
                 continue
             try:
@@ -396,6 +452,34 @@ class Trader:
                         "debug",
                         f"{symbol}: BUY skipped — daily trend bearish "
                         f"(death cross).",
+                    )
+                    return
+            else:
+                # Crypto regime gates (the SPY analog for the crypto book): a
+                # crypto BUY needs the proxy (BTC) both in a daily uptrend AND
+                # not red intraday. Each gate is independently toggleable; both
+                # fail open. See _update_crypto_regime / _warm_trend_cache.
+                sym = config.CRYPTO_REGIME_SYMBOL
+                if (
+                    sym
+                    and config.CRYPTO_REGIME_USE_TREND
+                    and self._trend_cache.get(sym) == "down"
+                ):
+                    self.log(
+                        "debug",
+                        f"{symbol}: BUY skipped — crypto regime ({sym}) "
+                        f"daily trend bearish.",
+                    )
+                    return
+                if (
+                    sym
+                    and config.CRYPTO_REGIME_USE_INTRADAY
+                    and self._crypto_regime_down
+                ):
+                    self.log(
+                        "debug",
+                        f"{symbol}: BUY skipped — crypto regime ({sym}) "
+                        f"red intraday.",
                     )
                     return
             self._open_long(symbol, analysis)

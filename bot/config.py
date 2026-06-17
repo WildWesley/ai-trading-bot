@@ -185,6 +185,19 @@ TREND_LOOKBACK_BARS: int = 365     # daily bars to fetch for the trend check
 # Crypto is exempt (it doesn't track the stock market).
 MARKET_REGIME_SYMBOL: str = "SPY"
 
+# Crypto-regime filter. Gates new long *crypto* entries on a single proxy
+# (CRYPTO_REGIME_SYMBOL, default BTC/USD) — the SPY analog for the crypto book.
+# Two independent gates, both consulted for every crypto BUY:
+#   - trend gate:    proxy daily EMA20 > EMA50 (slow, multi-week regime)
+#   - intraday gate: proxy trades at/above its prior daily (UTC) close
+# Empty CRYPTO_REGIME_SYMBOL disables BOTH. Each gate has its own toggle.
+# The trend gate needs the proxy in WATCHLIST (its trend is computed in the
+# warm-up loop); the intraday gate fetches the proxy directly. Any missing data
+# or error fails OPEN (crypto trading allowed).
+CRYPTO_REGIME_SYMBOL: str = "BTC/USD"
+CRYPTO_REGIME_USE_TREND: bool = True
+CRYPTO_REGIME_USE_INTRADAY: bool = True
+
 # Market-hours guard. Stocks are not traded in the first/last N minutes of the
 # session; all stock positions are flattened before close. Crypto is exempt.
 MARKET_BLACKOUT_MINUTES: int = 15
