@@ -113,6 +113,12 @@ class Trader:
         self._crypto_position_aliases: dict[str, str] = {
             s.replace("/", ""): s for s in self.watchlist if "/" in s
         }
+        # Entry time per held crypto symbol, for the time-cap exit. Set when we
+        # open a crypto long; lazily initialized to "now" the first time we see
+        # a position we have no record for (e.g. positions that predate a
+        # restart) — those get a fresh time-cap clock, while the price-based
+        # take-profit / stop-loss legs apply to them immediately regardless.
+        self._crypto_entry_times: dict[str, datetime] = {}
 
     # -- Public API ------------------------------------------------------
     def run_cycle(self) -> None:
@@ -349,7 +355,16 @@ class Trader:
             return
         for pos in positions:
             symbol = str(pos.get("symbol", ""))
-            if not symbol or is_crypto_symbol(symbol):
+            # Skip crypto: it trades 24/7 and is governed by its own exit policy
+            # (_maybe_close_crypto), not the stock market-close flatten. Alpaca
+            # reports crypto slashless ("BTCUSD"), so is_crypto_symbol() (which
+            # keys on "/") misses it — also check the slashless alias map, or the
+            # EOD flatten would wrongly liquidate the whole crypto book daily.
+            if (
+                not symbol
+                or is_crypto_symbol(symbol)
+                or symbol in self._crypto_position_aliases
+            ):
                 continue
             try:
                 order = self.client.close_position(symbol)
@@ -446,6 +461,13 @@ class Trader:
             position.get("qty", 0)
         ) > 0
 
+        # Crypto exits are price/time-driven (take-profit / stop-loss / time
+        # cap), checked every cycle regardless of the BUY/SELL signal. This
+        # replaces the (dead) RSI signal exit for crypto; stocks keep theirs.
+        if is_crypto_symbol(symbol) and has_position:
+            if self._maybe_close_crypto(symbol, position, analysis):
+                return
+
         if signal == "BUY" and not has_position:
             if not is_crypto_symbol(symbol):
                 # Market-regime filter: don't go long ANY stock while the broad
@@ -497,13 +519,9 @@ class Trader:
                     return
             self._open_long(symbol, analysis)
         elif signal == "SELL" and has_position and not is_crypto_symbol(symbol):
-            # NOTE (2026-06-17): crypto signal-driven exits are intentionally
-            # deferred. Now that crypto positions are recognized (alias map),
-            # this branch would otherwise start firing RSI>65 sells on crypto —
-            # but crypto's exit policy is still being designed (today crypto
-            # only exits via the EOD flatten). Hold crypto exits unchanged until
-            # that's decided, so this fix is limited to stopping the runaway
-            # accumulation. See _flatten_stock_positions and the project notes.
+            # Stocks exit on the RSI signal. Crypto does NOT use the signal exit
+            # (see _maybe_close_crypto above): the RSI>65 sell rarely fires in a
+            # downtrend, so crypto exits on take-profit / stop-loss / time cap.
             self._close_long(symbol, analysis, position)
         else:
             # Quietly hold; avoid flooding the event log on every HOLD.
@@ -541,6 +559,8 @@ class Trader:
                 return
             order = self.client.place_market_order(symbol, qty, "buy")
             est_qty = qty
+            # Start the time-cap clock for this crypto position (see exit policy).
+            self._crypto_entry_times[symbol] = datetime.now(timezone.utc)
         elif self._is_fractionable(symbol):
             # Fractionable stock: spend the whole dollar budget via a notional
             # order, so the share price never wastes budget or blocks the buy.
@@ -584,14 +604,24 @@ class Trader:
         self._attach_commentary(trade_id, symbol, analysis, trade)
 
     def _close_long(
-        self, symbol: str, analysis: dict, position: dict
+        self,
+        symbol: str,
+        analysis: dict,
+        position: dict,
+        reason: str | None = None,
     ) -> None:
         qty = float(position.get("qty", 0))
         # Realized P&L at close: Alpaca's unrealized P&L on the position is the
         # gain/loss we lock in by liquidating now.
         realized_pnl = float(position.get("unrealized_pl", 0.0))
 
-        order = self.client.close_position(symbol)
+        # Close using the symbol Alpaca itself reported for the position (crypto
+        # comes back slashless, e.g. "BTCUSD"), since that's the identifier its
+        # close endpoint expects; "BTC/USD" with a slash would not match. The
+        # trade is still recorded under the canonical watchlist `symbol` so a
+        # crypto buy and its sell share one symbol.
+        broker_symbol = str(position.get("symbol") or symbol)
+        order = self.client.close_position(broker_symbol)
         fill_price = (
             order.get("filled_avg_price")
             or analysis.get("price")
@@ -605,7 +635,7 @@ class Trader:
             "qty": qty,
             "price": fill_price,
             "total_value": round(qty * fill_price, 2),
-            "signal_reason": analysis.get("reason", ""),
+            "signal_reason": reason or analysis.get("reason", ""),
             "timestamp": _utc_now_iso(),
             "pnl_at_close": round(realized_pnl, 2),
         }
@@ -616,6 +646,58 @@ class Trader:
             f"(realized P&L ${realized_pnl:+.2f}).",
         )
         self._attach_commentary(trade_id, symbol, analysis, trade)
+
+    def _maybe_close_crypto(
+        self, symbol: str, position: dict, analysis: dict
+    ) -> bool:
+        """Apply the crypto exit policy to a held position and return True if it
+        was closed. Exits on whichever fires first, measured against the
+        position's average entry price (so accumulated bags use their real cost
+        basis): take-profit (CRYPTO_TAKE_PROFIT_PCT), stop-loss
+        (CRYPTO_STOP_LOSS_PCT), or time cap (CRYPTO_MAX_HOLD_HOURS). Each leg is
+        disabled when its config value is 0. Price/time-driven — runs every
+        cycle, independent of the BUY/SELL signal.
+        """
+        avg_entry = float(position.get("avg_entry_price", 0) or 0)
+        price = float(
+            position.get("current_price")
+            or analysis.get("price")
+            or self.client.get_latest_price(symbol)
+            or 0.0
+        )
+        if avg_entry <= 0 or price <= 0:
+            return False  # can't evaluate the policy; hold
+
+        tp = config.CRYPTO_TAKE_PROFIT_PCT
+        sl = config.CRYPTO_STOP_LOSS_PCT
+        cap_h = config.CRYPTO_MAX_HOLD_HOURS
+        gain = price / avg_entry - 1
+
+        reason: str | None = None
+        if tp and gain >= tp:
+            reason = f"Crypto take-profit (+{gain * 100:.1f}% ≥ {tp * 100:.0f}%)."
+        elif sl and gain <= -sl:
+            reason = f"Crypto stop-loss ({gain * 100:.1f}% ≤ -{sl * 100:.0f}%)."
+        elif cap_h:
+            entry_ts = self._crypto_entry_times.get(symbol)
+            if entry_ts is None:
+                # First sighting (e.g. position predates a restart): start the
+                # time-cap clock now. TP/SL above already applied this cycle.
+                self._crypto_entry_times[symbol] = datetime.now(timezone.utc)
+            else:
+                held_h = (
+                    datetime.now(timezone.utc) - entry_ts
+                ).total_seconds() / 3600.0
+                if held_h >= cap_h:
+                    reason = f"Crypto time cap ({held_h:.0f}h ≥ {cap_h:.0f}h)."
+
+        if reason is None:
+            return False
+
+        self.log("info", f"{symbol}: {reason}")
+        self._close_long(symbol, analysis, position, reason=reason)
+        self._crypto_entry_times.pop(symbol, None)
+        return True
 
     # -- AI commentary ---------------------------------------------------
     def _attach_commentary(

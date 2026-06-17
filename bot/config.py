@@ -203,6 +203,21 @@ CRYPTO_REGIME_SYMBOL: str = "BTC/USD"
 CRYPTO_REGIME_USE_TREND: bool = False
 CRYPTO_REGIME_USE_INTRADAY: bool = False
 
+# Crypto exit policy (2026-06-17, backtested). Crypto has NO signal-based exit:
+# the RSI>65 sell rarely fires in a downtrend and just lets bags accumulate. Each
+# crypto position instead exits on whichever fires first, checked every cycle vs
+# the position's average entry price:
+#   - take-profit: price >= avg_entry * (1 + CRYPTO_TAKE_PROFIT_PCT)
+#   - stop-loss  : price <= avg_entry * (1 - CRYPTO_STOP_LOSS_PCT)   (crash guard)
+#   - time cap   : held >= CRYPTO_MAX_HOLD_HOURS
+# Backtest over the real entries (8 days): TP5% + 24h cap ≈ +$1,935 / 73% win;
+# the 8% stop never triggered in that window (≈free crash insurance) and a stop
+# is a deliberate hedge against a regime where dips stop mean-reverting. Set any
+# leg to 0 to disable it.
+CRYPTO_TAKE_PROFIT_PCT: float = 0.05
+CRYPTO_STOP_LOSS_PCT: float = 0.08
+CRYPTO_MAX_HOLD_HOURS: float = 24.0
+
 # Market-hours guard. Stocks are not traded in the first/last N minutes of the
 # session; all stock positions are flattened before close. Crypto is exempt.
 MARKET_BLACKOUT_MINUTES: int = 15
