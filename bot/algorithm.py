@@ -5,12 +5,17 @@ returns a plain dict. It performs no I/O and has no dependencies on Alpaca,
 the database, or network access, which keeps it trivially unit-testable.
 
 Strategy (per symbol, on 5-minute candles):
-    BUY  : RSI(14) < 35  AND EMA(9) crosses *above* EMA(21)
-    SELL : RSI(14) > 65  AND EMA(9) crosses *below* EMA(21)
+    BUY  : RSI(14) < RSI_BUY_THRESHOLD  AND EMA(9) above EMA(21) (uptrend state)
+    SELL : RSI(14) > RSI_SELL_THRESHOLD (overbought) — take profit on the bounce
     HOLD : otherwise
 
-A "cross above" on the current bar means EMA(9) was at/below EMA(21) on the
-previous bar and is strictly above it on the latest bar (and vice versa).
+The SELL previously also required a fresh EMA(9)-below-EMA(21) cross-down on the
+same bar. Backtesting ~2 weeks of real 5-min data showed that combined condition
+almost never fired (it's contradictory — "just overbought" means still rallying,
+not rolling over), so stock positions only ever exited at the end-of-day flatten
+and never took intraday profit. Selling on overbought ALONE captured profit far
+more consistently, so the cross-down requirement was dropped and the threshold
+lowered (65 -> 60). The cross is still computed for the HOLD diagnostic text.
 """
 
 from __future__ import annotations
@@ -269,13 +274,16 @@ def decide(
             **common,
         )
 
-    if rsi > sell_rsi and crossed_down:
+    # SELL on overbought ALONE (no EMA cross-down co-requirement). The old
+    # combined rule was effectively inert — see the module docstring. Crypto
+    # ignores this signal exit entirely (it uses _maybe_close_crypto); in
+    # practice only stocks act on SELL (see trader._process_symbol).
+    if rsi > sell_rsi:
         return _result(
             "SELL",
             reason=(
-                f"{symbol}: SELL — RSI {rsi:.1f} > {sell_rsi:.0f} (overbought) "
-                f"and EMA{fast_period} ({ema_fast:.2f}) crossed below "
-                f"EMA{slow_period} ({ema_slow:.2f})."
+                f"{symbol}: SELL — RSI {rsi:.1f} > {sell_rsi:.0f} (overbought); "
+                f"take profit on the bounce."
             ),
             **common,
         )

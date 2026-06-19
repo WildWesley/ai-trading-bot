@@ -125,6 +125,16 @@ class FakeClient:
         return {"symbol": symbol, "side": "sell", "filled_avg_price": 100.0}
 
 
+@pytest.fixture(autouse=True)
+def _crypto_entries_on(monkeypatch) -> None:
+    """Most tests exercise crypto ENTRY mechanics (sizing, regime gates, alias
+    recognition), which only run when crypto trading is enabled. Production now
+    defaults CRYPTO_TRADING_ENABLED=False (short-timeframe crypto loses to cost),
+    so flip it back on for the suite; the master switch has its own dedicated
+    test (test_trader_crypto_master_switch.py)."""
+    monkeypatch.setattr("bot.config.CRYPTO_TRADING_ENABLED", True)
+
+
 @pytest.fixture
 def fake_db() -> FakeDB:
     return FakeDB()

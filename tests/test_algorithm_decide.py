@@ -38,10 +38,21 @@ def test_no_buy_when_rsi_at_or_above_threshold():
     assert _decide(50.0, 101.0, 100.0, 101.0, 100.0) == "HOLD"
 
 
-def test_sell_still_requires_overbought_plus_cross_down():
-    # SELL unchanged: RSI > 65 and a fresh cross-down.
+def test_sell_threshold_is_60():
+    assert config.RSI_SELL_THRESHOLD == 60.0
+
+
+def test_sell_fires_on_overbought_alone_no_cross_down_needed():
+    # SELL now fires on RSI > threshold regardless of the EMA cross. Here the
+    # fast EMA is ABOVE slow with no cross-down at all, yet overbought -> SELL.
+    assert _decide(70.0, 101.0, 100.0, 101.0, 100.0) == "SELL"
+
+
+def test_sell_fires_even_with_cross_down():
+    # A cross-down while overbought still sells (subset of "overbought").
     assert _decide(70.0, 99.0, 100.0, 101.0, 100.0) == "SELL"
 
 
-def test_overbought_without_cross_down_holds():
-    assert _decide(70.0, 99.0, 100.0, 99.0, 100.0) == "HOLD"
+def test_not_overbought_holds():
+    # Just under the 60 threshold, uptrend state, not a pullback -> HOLD.
+    assert _decide(55.0, 101.0, 100.0, 99.0, 100.0) == "HOLD"

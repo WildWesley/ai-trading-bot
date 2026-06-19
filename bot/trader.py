@@ -313,10 +313,14 @@ class Trader:
             return
 
         blackout = config.MARKET_BLACKOUT_MINUTES * 60
+        # Opening pause: the wider of the safety blackout and the (data-driven)
+        # open-skip window, so we sit out the volatile first ~90 min. Closing
+        # blackout / EOD flatten below stay on MARKET_BLACKOUT_MINUTES.
+        opening_pause = max(blackout, config.MARKET_OPEN_SKIP_MINUTES * 60)
 
         in_opening_blackout = (
             self._market_opened_at is not None
-            and (now_utc - self._market_opened_at).total_seconds() < blackout
+            and (now_utc - self._market_opened_at).total_seconds() < opening_pause
         )
 
         # NOTE: the EOD flatten relies on at least one cycle landing inside the
@@ -490,6 +494,16 @@ class Trader:
                     )
                     return
             else:
+                # Master switch: crypto entries are disabled (short-timeframe
+                # crypto loses to buy-and-hold after the taker fee — see config).
+                # Existing crypto positions still exit via _maybe_close_crypto
+                # above, so the book winds down to cash rather than re-buying.
+                if not config.CRYPTO_TRADING_ENABLED:
+                    self.log(
+                        "debug",
+                        f"{symbol}: BUY skipped — crypto trading disabled.",
+                    )
+                    return
                 # Crypto regime gates (the SPY analog for the crypto book): a
                 # crypto BUY needs the proxy (BTC) both in a daily uptrend AND
                 # not red intraday. Each gate is independently toggleable; both

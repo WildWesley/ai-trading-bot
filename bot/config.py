@@ -169,7 +169,13 @@ RSI_PERIOD: int = 14
 EMA_FAST_PERIOD: int = 9
 EMA_SLOW_PERIOD: int = 21
 RSI_BUY_THRESHOLD: float = 45.0   # buy pullbacks; regime filter guards downtrends
-RSI_SELL_THRESHOLD: float = 65.0
+# SELL fires on overbought ALONE (no EMA cross-down co-requirement — see
+# algorithm.decide). Lowered 65 -> 60 after backtesting ~2 wk of real 5-min data:
+# the old RSI>65 + cross-down combo never fired, so stocks only exited at the EOD
+# flatten and never took intraday profit. RSI>60-alone captured profit ~4x better
+# in-sample; kept at 60 (NOT lower) — the gains kept rising toward "sell on any
+# tiny pop", an overfitting red flag that would cut winners in a trending tape.
+RSI_SELL_THRESHOLD: float = 60.0
 
 # Daily trend filter. A BUY on a stock is skipped unless its faster daily EMA
 # is above its slower daily EMA. Tuned to a medium-term (20/50) trend rather
@@ -218,9 +224,29 @@ CRYPTO_TAKE_PROFIT_PCT: float = 0.05
 CRYPTO_STOP_LOSS_PCT: float = 0.08
 CRYPTO_MAX_HOLD_HOURS: float = 24.0
 
+# Master switch for opening NEW crypto positions. DISABLED 2026-06-18 after a
+# 2-week analysis: short-timeframe crypto trading loses to buy-and-hold once the
+# ~0.15-0.25%/side taker fee + slippage is paid (paper simulates the fee, so it's
+# real). Backtest, net of cost, over the window: buy&hold +$65 vs the bot's RSI
+# mean-reversion -$1,478. The same strategy is +EV on STOCKS (free execution),
+# so the edge is real but only viable where trading is free. When False, the bot
+# stops opening crypto positions but STILL manages/exits any it already holds
+# (take-profit / stop-loss / time cap), so the existing book winds down to cash
+# rather than being force-sold. Set True to resume crypto entries.
+CRYPTO_TRADING_ENABLED: bool = False
+
 # Market-hours guard. Stocks are not traded in the first/last N minutes of the
 # session; all stock positions are flattened before close. Crypto is exempt.
 MARKET_BLACKOUT_MINUTES: int = 15
+
+# Opening no-trade window (stocks). No NEW stock entries for the first N minutes
+# after the open — separate from MARKET_BLACKOUT_MINUTES so the closing blackout
+# / EOD flatten timing is unaffected. Set 2026-06-18 from a 2-week time-of-day
+# analysis: entries in the first ~1.5h of the session (9:30-11:00 ET) net -$519
+# vs +$329 for midday/afternoon — the volatile open whipsaws the mean-reversion
+# entries. 90 min skips the two worst buckets. The effective opening pause is
+# max(MARKET_BLACKOUT_MINUTES, MARKET_OPEN_SKIP_MINUTES). Set 0 to disable.
+MARKET_OPEN_SKIP_MINUTES: int = 90
 
 # ---------------------------------------------------------------------------
 # UI

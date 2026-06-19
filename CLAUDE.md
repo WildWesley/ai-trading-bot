@@ -86,7 +86,8 @@ crypto-regime filter below). See `algorithm.compute_daily_trend`.
 - **BUY**: `RSI(14) < 45` (pullback) **and** `EMA(9)` is **above** `EMA(21)`
   (short-term uptrend *state*, not a fresh cross) **and** the daily trend is not
   "down" **and** the market regime is not "down" (see below)
-- **SELL**: `RSI(14) > 65` **and** `EMA(9)` crosses below `EMA(21)`
+- **SELL**: `RSI(14) > 60` (overbought) — take profit on the bounce. (Stocks
+  only; crypto ignores the signal exit.)
 - **HOLD**: otherwise
 
 History: the original BUY needed RSI<35 + a fresh crossover *event*, which fired
@@ -95,6 +96,25 @@ trade data showed RSI<35 (and even <40) fired on <1% of setups — near-zero
 trading — while not improving the win rate. Settled on RSI<45 + EMA *state*,
 relying on the intraday market-regime filter below to guard downtrends rather
 than choking entries with a tight RSI.
+
+SELL history: the SELL once also required a fresh EMA(9)-below-EMA(21) cross-down
+*and* RSI>65. A 2-week analysis (2026-06-18) found that combo NEVER fired on
+stocks — every stock exited at the EOD flatten, taking no intraday profit.
+Backtesting exit variants on real 5-min bars, selling on overbought ALONE
+captured profit ~4x better; the cross-down requirement was dropped and the
+threshold lowered 65→60. (Held at 60, not lower: P&L kept rising as the threshold
+dropped — an overfitting tell that lower = "sell on any tiny pop", which cuts
+winners in a trending tape.)
+
+**Crypto trading is DISABLED by default** (`CRYPTO_TRADING_ENABLED=False`, set
+2026-06-18). The same 2-week analysis showed short-timeframe crypto loses to
+buy-and-hold once the ~0.15–0.25%/side taker fee + slippage is paid (Alpaca paper
+DOES simulate the crypto fee, so it transfers to live): net of cost over the
+window, buy&hold +$65 vs the bot's RSI mean-reversion −$1,478. The identical
+strategy is +EV on STOCKS, where execution is free — so the edge is real but only
+where trading is free. With the switch off the bot opens no new crypto but still
+exits any it holds (the book winds down to cash). Re-enable only with a plan for
+the cost (e.g. limit/maker orders + far lower turnover).
 
 **Market-regime filter (stocks only, `MARKET_REGIME_SYMBOL`, default "SPY"):**
 no long stock buys while the broad-market proxy is **"red" intraday** — trading
@@ -129,10 +149,15 @@ Both gates **fail open** (missing data / error → trade allowed); empty
 of `trader._process_symbol`. Rationale: individual alts are too volatile for
 their own EMA cross, so BTC is used as the shared proxy (like SPY for stocks).
 
-**Market-hours guard (stocks only):** no new stock trades in the first/last 15
-minutes of the session (`MARKET_BLACKOUT_MINUTES`) or while the market is
-closed; all stock positions are flattened ~15 minutes before close to avoid
-overnight gap risk. Crypto trades 24/7. Driven by Alpaca's `/clock` endpoint
+**Market-hours guard (stocks only):** no new stock trades in the last 15 minutes
+of the session (`MARKET_BLACKOUT_MINUTES`) or while the market is closed; all
+stock positions are flattened ~15 minutes before close to avoid overnight gap
+risk. The OPENING pause is wider — `MARKET_OPEN_SKIP_MINUTES` (default 90, set
+2026-06-18): a 2-week time-of-day analysis found entries in the first ~1.5h
+(9:30–11:00 ET) net −$519 vs +$329 midday/afternoon, so the bot sits out the
+volatile open. Effective opening pause = `max(MARKET_BLACKOUT_MINUTES,
+MARKET_OPEN_SKIP_MINUTES)`; closing/flatten timing is unchanged. Crypto trades
+24/7 (when enabled). Driven by Alpaca's `/clock` endpoint
 (`alpaca_client.get_clock`, `trader._update_market_state`).
 
 ## Position sizing (`trader._open_long`)
