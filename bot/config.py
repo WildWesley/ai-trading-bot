@@ -150,6 +150,25 @@ WATCHLIST: list[str] = _get_list(
         "ADP", "WM", "CTAS", "GWW", "OKE", "D",
         # Wave 2 — more ETFs
         "DIA", "VTI", "XLK", "XLY", "XLI", "XLP", "XLU", "SMH",
+        # Wave 3 (2026-06-18) — +91 liquid names to 325 stocks. Focus is the
+        # free, liquid stock book (active crypto is disabled); all validated
+        # tradable on Alpaca at add time.
+        # software / internet
+        "SNAP", "PINS", "RBLX", "DASH", "ROKU", "SPOT", "TEAM", "MDB", "SNPS",
+        "CDNS", "WDAY", "ADSK", "DOCN", "GTLB", "S", "PATH", "BILL", "DT",
+        "PAYC", "MELI", "SE", "TTD", "EA", "TTWO", "APP",
+        # semiconductors
+        "GFS", "ENTG", "QRVO", "LSCC", "AMKR", "OLED", "COHR", "RMBS", "SLAB",
+        # finance / fintech
+        "HOOD", "SOFI", "AFRM", "NU", "TOST", "FOUR", "ALLY", "KEY", "RF",
+        "CFG", "MTB", "CBOE", "NDAQ", "TROW", "RJF", "STT", "HIG", "BRO",
+        "ACGL", "NWG", "ZION",
+        # healthcare
+        "HCA", "DVA", "CAH", "COR", "A", "WAT", "MTD", "ALNY", "BMRN", "INCY",
+        "PODD", "ALGN", "DGX", "LH", "WST", "BAX", "COO", "MOH",
+        # consumer / retail / autos
+        "DKNG", "DPZ", "WING", "TXRH", "DRI", "CAVA", "DECK", "CROX", "ONON",
+        "ROST", "DLTR", "FIVE", "WSM", "BBY", "TSCO", "GPC", "KMX", "RIVN",
         # Crypto (24/7 — bypass the market-hours guard and trend filter)
         "BTC/USD", "ETH/USD", "SOL/USD", "LTC/USD", "AVAX/USD",
         "LINK/USD", "UNI/USD", "AAVE/USD", "BCH/USD", "DOT/USD",
