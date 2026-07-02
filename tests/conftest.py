@@ -126,6 +126,15 @@ class FakeClient:
 
 
 @pytest.fixture(autouse=True)
+def _rsi_strategy(monkeypatch) -> None:
+    """The legacy suite exercises the RSI intraday cycle (run_cycle → per-symbol
+    signals). Production now defaults STRATEGY='momentum', which dispatches
+    run_cycle to the weekly rotation instead — so pin 'rsi' for these tests. The
+    momentum path has its own dedicated tests (test_momentum.py) that opt back in."""
+    monkeypatch.setattr("bot.config.STRATEGY", "rsi")
+
+
+@pytest.fixture(autouse=True)
 def _crypto_entries_on(monkeypatch) -> None:
     """Most tests exercise crypto ENTRY mechanics (sizing, regime gates, alias
     recognition), which only run when crypto trading is enabled. Production now

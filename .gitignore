@@ -28,3 +28,9 @@ env/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Backtest data caches + analysis artifacts (2026-07)
+data/bars_cache/
+data/bars_long/
+data/algo_returns/
+data/bt_results.json

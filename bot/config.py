@@ -180,6 +180,31 @@ TRADE_INTERVAL_SECONDS: int = _get_int("TRADE_INTERVAL_SECONDS", 300)
 MAX_POSITION_SIZE_USD: float = _get_float("MAX_POSITION_SIZE_USD", 1000.0)
 
 # ---------------------------------------------------------------------------
+# Strategy selection
+# ---------------------------------------------------------------------------
+# Which strategy the trader runs each cycle:
+#   "momentum" — weekly concentrated cross-sectional momentum rotation (the
+#                2026-07 flagship; see MOMENTUM_STRATEGY.md). RECOMMENDED default.
+#   "rsi"      — the legacy 5-minute RSI+EMA intraday strategy.
+# Takes effect on the next process start. Set STRATEGY=rsi in .env to revert.
+STRATEGY: str = _get_str("STRATEGY", "momentum").lower()
+
+# Momentum rotation parameters (LOCKED — see MOMENTUM_STRATEGY.md). The universe
+# is the non-crypto WATCHLIST minus the SPY/QQQ benchmarks. Each weekly
+# rebalance holds the top-N names by 12-1 momentum that are above their 200-day
+# SMA, equal weight; a name is sold when it drops out of the top-N or below its
+# 200-day SMA. Winners already held are left to run (low turnover). No leverage,
+# no market-timing filter, no crypto — those were tested and rejected.
+MOMENTUM_TOP_N: int = _get_int("MOMENTUM_TOP_N", 15)
+MOMENTUM_LOOKBACK_DAYS: int = _get_int("MOMENTUM_LOOKBACK_DAYS", 126)  # ~6 months
+MOMENTUM_SKIP_DAYS: int = _get_int("MOMENTUM_SKIP_DAYS", 5)            # skip last week
+MOMENTUM_SMA_WINDOW: int = _get_int("MOMENTUM_SMA_WINDOW", 200)        # trend filter
+MOMENTUM_BARS_LOOKBACK: int = _get_int("MOMENTUM_BARS_LOOKBACK", 260)  # daily bars/symbol
+# Weekly rebalance cadence: 0=Mon .. 4=Fri. The rotation rebalances once per ISO
+# week, on the first market-open cycle on/after this weekday.
+MOMENTUM_REBALANCE_WEEKDAY: int = _get_int("MOMENTUM_REBALANCE_WEEKDAY", 0)
+
+# ---------------------------------------------------------------------------
 # Strategy constants (per the spec)
 # ---------------------------------------------------------------------------
 BARS_LOOKBACK: int = 50          # number of candles to fetch per analysis

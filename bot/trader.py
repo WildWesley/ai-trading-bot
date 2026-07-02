@@ -23,7 +23,7 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Callable, Deque, Protocol
 
-from . import algorithm, config
+from . import algorithm, config, momentum
 from .alpaca_client import is_crypto_symbol
 
 
@@ -119,11 +119,22 @@ class Trader:
         # restart) — those get a fresh time-cap clock, while the price-based
         # take-profit / stop-loss legs apply to them immediately regardless.
         self._crypto_entry_times: dict[str, datetime] = {}
+        # Momentum rotation: the ISO week ("2026-W27") of the last rebalance, so
+        # the weekly rotation fires at most once per week. None until the first.
+        self._last_rebalance_week: str | None = None
 
     # -- Public API ------------------------------------------------------
     def run_cycle(self) -> None:
-        """Run one full trading cycle. Never raises — errors become events."""
+        """Run one full trading cycle. Never raises — errors become events.
+
+        Dispatches on ``config.STRATEGY``: "momentum" runs the weekly rotation
+        (cheap except on the weekly rebalance); "rsi" runs the legacy 5-minute
+        intraday cycle below.
+        """
         self.cycle_count += 1
+        if config.STRATEGY == "momentum":
+            self._run_momentum_cycle()
+            return
         self.log("info", f"Cycle {self.cycle_count} started.")
         self._warm_trend_cache_if_needed()
         self._update_market_state()
@@ -712,6 +723,198 @@ class Trader:
         self._close_long(symbol, analysis, position, reason=reason)
         self._crypto_entry_times.pop(symbol, None)
         return True
+
+    # -- Momentum rotation -----------------------------------------------
+    def _run_momentum_cycle(self) -> None:
+        """One cycle of the weekly momentum rotation. Cheap on ordinary days —
+        it only records a snapshot; the heavy rebalance runs at most once per
+        ISO week (see ``_maybe_rebalance_momentum``). Unlike the RSI cycle it
+        never flattens positions: momentum holds names for weeks."""
+        self.log("info", f"Cycle {self.cycle_count} (momentum) started.")
+        try:
+            self._maybe_rebalance_momentum()
+        except Exception as exc:  # noqa: BLE001 - the loop must never die
+            self.log("error", f"momentum rebalance failed: {exc}")
+        try:
+            self._record_snapshot()
+        except Exception as exc:  # noqa: BLE001
+            self.log("error", f"snapshot failed: {exc}")
+        self.last_cycle_at = _utc_now_iso()
+        self.log("info", f"Cycle {self.cycle_count} complete.")
+
+    def _maybe_rebalance_momentum(self) -> None:
+        """Rebalance once per ISO week, on the first market-open cycle on/after
+        the configured weekday. Idempotent within a week via
+        ``_last_rebalance_week``; robust to downtime (catches up later in the
+        week)."""
+        now = datetime.now(timezone.utc)
+        iso_year, iso_week, iso_weekday = now.isocalendar()  # weekday 1=Mon..7=Sun
+        week_key = f"{iso_year}-W{iso_week:02d}"
+        if self._last_rebalance_week == week_key:
+            return  # already rebalanced this week
+        if (iso_weekday - 1) < config.MOMENTUM_REBALANCE_WEEKDAY:
+            return  # not yet the rebalance weekday this week
+        if not self._market_open_for_rebalance():
+            return
+        self._rebalance_momentum()
+        self._last_rebalance_week = week_key
+
+    def _market_open_for_rebalance(self) -> bool:
+        """True when the stock market is open and outside the closing blackout —
+        a clean window for rebalance fills. Never flattens (momentum holds for
+        weeks). On any clock failure, defer the rebalance."""
+        try:
+            clock = self.client.get_clock()
+        except Exception as exc:  # noqa: BLE001
+            self.log("error", f"clock unavailable; deferring rebalance: {exc}")
+            return False
+        if not clock.get("is_open"):
+            return False
+        next_close = clock.get("next_close")
+        if next_close is not None:
+            secs_to_close = (next_close - datetime.now(timezone.utc)).total_seconds()
+            if 0 <= secs_to_close < config.MARKET_BLACKOUT_MINUTES * 60:
+                return False
+        return True
+
+    def _rebalance_momentum(self) -> None:
+        """The weekly rotation: score the universe, sell names that fell out of
+        the target, and buy new entrants at equal weight. Existing holders that
+        remain in the target are left to run (keeps turnover low)."""
+        universe = [
+            s for s in self.watchlist
+            if not is_crypto_symbol(s) and s not in ("SPY", "QQQ")
+        ]
+        self.log("info", f"Momentum rebalance: scoring {len(universe)} names...")
+        bars_by: dict[str, Any] = {}
+        for i, symbol in enumerate(universe, start=1):
+            try:
+                df = self.client.get_bars(
+                    symbol, "1Day", config.MOMENTUM_BARS_LOOKBACK
+                )
+                if df is not None and not df.empty:
+                    bars_by[symbol] = df
+            except Exception as exc:  # noqa: BLE001 - isolate per-symbol faults
+                self.log("error", f"{symbol}: momentum bars failed: {exc}")
+            if i % 50 == 0:
+                self.log("info", f"Momentum data: {i}/{len(universe)}...")
+
+        target = momentum.select_top(
+            bars_by,
+            lookback=config.MOMENTUM_LOOKBACK_DAYS,
+            skip=config.MOMENTUM_SKIP_DAYS,
+            sma_window=config.MOMENTUM_SMA_WINDOW,
+            top_n=config.MOMENTUM_TOP_N,
+        )
+        if not target:
+            self.log(
+                "warning",
+                "Momentum: no eligible names (all below their 200d SMA?); "
+                "holding current book.",
+            )
+            return
+        self.log("info", f"Momentum target ({len(target)}): {', '.join(target)}")
+
+        # Current *stock* positions only — the momentum book is stocks; any
+        # residual crypto is left alone (it winds down via its own policy under
+        # the RSI strategy). Alpaca reports crypto slashless, so exclude both.
+        try:
+            current = {
+                str(p.get("symbol")): p
+                for p in self.client.get_positions()
+                if not is_crypto_symbol(str(p.get("symbol")))
+                and str(p.get("symbol")) not in self._crypto_position_aliases
+            }
+        except Exception as exc:  # noqa: BLE001
+            self.log(
+                "error",
+                f"Momentum: could not fetch positions; aborting rebalance: {exc}",
+            )
+            return
+        target_set = set(target)
+
+        # 1) SELL names that dropped out of the target (frees cash for entrants).
+        for symbol, position in current.items():
+            if symbol in target_set:
+                continue
+            try:
+                self._close_long(
+                    symbol,
+                    {"price": position.get("current_price")},
+                    position,
+                    reason="Momentum exit: out of top-N / below 200d SMA.",
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.log("error", f"Momentum sell failed for {symbol}: {exc}")
+
+        # 2) BUY new entrants at equal weight (equity / N). Held targets ride.
+        try:
+            equity = float(self.client.get_account().get("equity", 0.0))
+        except Exception as exc:  # noqa: BLE001
+            self.log("error", f"Momentum: no account equity; skipping buys: {exc}")
+            return
+        budget = equity / config.MOMENTUM_TOP_N if config.MOMENTUM_TOP_N else 0.0
+        if budget <= 0:
+            self.log("warning", "Momentum: non-positive per-name budget; skipping buys.")
+            return
+        for symbol in target:
+            if symbol in current:
+                continue  # already held; let the winner run
+            try:
+                self._place_buy(
+                    symbol,
+                    budget,
+                    "Momentum entry: top-N by 12-1 momentum, above 200d SMA.",
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.log("error", f"Momentum buy failed for {symbol}: {exc}")
+        self.log("info", "Momentum rebalance complete.")
+
+    def _place_buy(self, symbol: str, budget: float, reason: str) -> None:
+        """Buy ~``budget`` dollars of a stock (notional if fractionable, else
+        whole shares) and record the trade. Shared by the momentum rebalancer."""
+        price = self.client.get_latest_price(symbol)
+        if not price or price <= 0:
+            self.log("error", f"{symbol}: no valid price; skipping BUY.")
+            return
+        if self._is_fractionable(symbol):
+            order = self.client.place_market_order(
+                symbol, side="buy", notional=budget
+            )
+            est_qty = round(budget / price, 6)
+        else:
+            qty = int(budget // price)
+            if qty < 1:
+                self.log(
+                    "info",
+                    f"{symbol}: ${price:.2f} exceeds per-name budget "
+                    f"${budget:.0f} and not fractionable; skipping BUY.",
+                )
+                return
+            order = self.client.place_market_order(symbol, qty, "buy")
+            est_qty = qty
+
+        fill_price = order.get("filled_avg_price") or price
+        filled_qty = order.get("filled_qty") or est_qty
+        trade = {
+            "symbol": symbol,
+            "side": "buy",
+            "qty": filled_qty,
+            "price": fill_price,
+            "total_value": round(filled_qty * fill_price, 2),
+            "signal_reason": reason,
+            "timestamp": _utc_now_iso(),
+            "pnl_at_close": None,
+        }
+        trade_id = self.db.record_trade(trade)
+        self.log(
+            "trade",
+            f"BUY {filled_qty} {symbol} @ ${fill_price:.2f} "
+            f"(${trade['total_value']:.2f}).",
+        )
+        self._attach_commentary(
+            trade_id, symbol, {"reason": reason, "price": fill_price}, trade
+        )
 
     # -- AI commentary ---------------------------------------------------
     def _attach_commentary(
