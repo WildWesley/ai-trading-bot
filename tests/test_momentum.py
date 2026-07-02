@@ -100,3 +100,16 @@ def test_rebalance_fires_on_startup_regardless_of_weekday(fake_client, fake_db, 
     t._maybe_rebalance_momentum()
     assert t._did_initial_rebalance is True
     assert len(fake_client.orders) > 0            # invested immediately on startup
+
+
+def test_recurring_rebalance_waits_for_midday(fake_client, fake_db, monkeypatch):
+    _mom_config(monkeypatch)
+    monkeypatch.setattr(config, "MOMENTUM_REBALANCE_WEEKDAY", 0)  # any weekday qualifies
+    monkeypatch.setattr(config, "MOMENTUM_REBALANCE_HOUR_ET", 24)  # never reached today
+    fake_client.bars_daily = {"AAA": _bars(2.0), "CCC": _bars(1.0)}
+    t = Trader(fake_client, fake_db, advisor=None, watchlist=["AAA", "CCC"])
+    # Simulate a already-deployed bot (past the startup rebalance): a RECURRING
+    # rebalance must wait for the midday hour, so nothing trades before then.
+    t._did_initial_rebalance = True
+    t._maybe_rebalance_momentum()
+    assert len(fake_client.orders) == 0

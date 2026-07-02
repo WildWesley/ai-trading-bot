@@ -21,6 +21,11 @@ intraday signal bot. Adopting it is a rebuild, not a config tweak.
    of fading leaders and into new ones fast enough to survive factor reversals
    like 2021, with no cost to the rest of the record. Faster than weekly
    (daily) makes it worse; slower (monthly) leaves the 2021 hole.
+   *Timing:* recurring rebalances run **Tuesday ~noon ET** (`MOMENTUM_REBALANCE_
+   WEEKDAY=1`, `MOMENTUM_REBALANCE_HOUR_ET=12`) — backtests mildly favor Tue/Wed
+   over Mon/Thu and midday avoids the volatile open (better fills). The **first**
+   rebalance after any restart ignores this and invests as soon as the market is
+   open (immediacy over fill quality for a one-time deploy).
 6. **Exit ("when needed", no RSI):** at each weekly rebalance a name is sold if
    it (a) drops out of the top 15, or (b) falls below its 200-day SMA. That's
    the entire exit — a trend/relative-strength rule that lets winners run for

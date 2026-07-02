@@ -22,6 +22,9 @@ import threading
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Callable, Deque, Protocol
+from zoneinfo import ZoneInfo
+
+_ET = ZoneInfo("America/New_York")  # rebalance timing is in US market time
 
 from . import algorithm, config, momentum
 from .alpaca_client import is_crypto_symbol
@@ -784,19 +787,22 @@ class Trader:
         the configured weekday. Idempotent within a week via
         ``_last_rebalance_week``; robust to downtime (catches up later in the
         week)."""
-        now = datetime.now(timezone.utc)
-        iso_year, iso_week, iso_weekday = now.isocalendar()  # weekday 1=Mon..7=Sun
+        # Work in US/Eastern so the weekday + midday-hour cadence line up with the
+        # actual trading session (the ISO week is stable within a session).
+        now_et = datetime.now(_ET)
+        iso_year, iso_week, iso_weekday = now_et.isocalendar()  # weekday 1=Mon..7=Sun
         week_key = f"{iso_year}-W{iso_week:02d}"
         if self._last_rebalance_week == week_key:
             return  # already rebalanced this week
-        # The first rebalance after a (re)start fires at the next market open,
-        # regardless of the configured weekday, so a fresh deploy invests right
-        # away instead of waiting for e.g. Monday. Subsequent rebalances hold to
-        # the weekly cadence on the configured weekday.
-        if self._did_initial_rebalance and (
-            (iso_weekday - 1) < config.MOMENTUM_REBALANCE_WEEKDAY
-        ):
-            return  # not yet the rebalance weekday this week
+        # The first rebalance after a (re)start fires as soon as the market is
+        # open — regardless of the configured weekday/hour — so a fresh deploy
+        # invests right away. Recurring rebalances hold to the weekly cadence:
+        # on/after the configured weekday AND past the midday hour (calmer fills).
+        if self._did_initial_rebalance:
+            if (iso_weekday - 1) < config.MOMENTUM_REBALANCE_WEEKDAY:
+                return  # not yet the rebalance weekday this week
+            if now_et.hour < config.MOMENTUM_REBALANCE_HOUR_ET:
+                return  # wait for the calmer midday session
         if not self._market_open_for_rebalance():
             return
         self._rebalance_momentum()

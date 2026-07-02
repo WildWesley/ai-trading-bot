@@ -201,8 +201,15 @@ MOMENTUM_SKIP_DAYS: int = _get_int("MOMENTUM_SKIP_DAYS", 5)            # skip la
 MOMENTUM_SMA_WINDOW: int = _get_int("MOMENTUM_SMA_WINDOW", 200)        # trend filter
 MOMENTUM_BARS_LOOKBACK: int = _get_int("MOMENTUM_BARS_LOOKBACK", 260)  # daily bars/symbol
 # Weekly rebalance cadence: 0=Mon .. 4=Fri. The rotation rebalances once per ISO
-# week, on the first market-open cycle on/after this weekday.
-MOMENTUM_REBALANCE_WEEKDAY: int = _get_int("MOMENTUM_REBALANCE_WEEKDAY", 0)
+# week, on the first cycle on/after this weekday that is past the midday hour
+# below. Default Tuesday: backtests mildly favor Tue/Wed over Mon/Thu, and it
+# sidesteps Monday's weekend-gap open (the effect is partly noise but costless).
+MOMENTUM_REBALANCE_WEEKDAY: int = _get_int("MOMENTUM_REBALANCE_WEEKDAY", 1)
+# Recurring rebalances wait until at least this hour (US/Eastern) so they trade
+# in the calmer midday session rather than the volatile open — better fills.
+# The FIRST rebalance after a restart ignores this and invests as soon as the
+# market is open (immediacy over fill quality for a one-time deploy).
+MOMENTUM_REBALANCE_HOUR_ET: int = _get_int("MOMENTUM_REBALANCE_HOUR_ET", 12)
 
 # ---------------------------------------------------------------------------
 # Strategy constants (per the spec)
