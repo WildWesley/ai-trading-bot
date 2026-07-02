@@ -86,3 +86,17 @@ def test_rebalance_fires_once_per_week(fake_client, fake_db, monkeypatch):
     assert orders_after_first > 0                 # rebalanced
     t._maybe_rebalance_momentum()                 # same ISO week → no-op
     assert len(fake_client.orders) == orders_after_first
+
+
+def test_rebalance_fires_on_startup_regardless_of_weekday(fake_client, fake_db, monkeypatch):
+    _mom_config(monkeypatch)
+    # Configure the recurring cadence for Sunday (weekday 6) — normally that
+    # would block a Mon–Sat cycle. The FIRST rebalance after startup must fire
+    # anyway (market is open in the fake clock), so a fresh deploy invests now.
+    monkeypatch.setattr(config, "MOMENTUM_REBALANCE_WEEKDAY", 6)
+    fake_client.bars_daily = {"AAA": _bars(2.0), "CCC": _bars(1.0)}
+    t = Trader(fake_client, fake_db, advisor=None, watchlist=["AAA", "CCC"])
+    assert t._did_initial_rebalance is False
+    t._maybe_rebalance_momentum()
+    assert t._did_initial_rebalance is True
+    assert len(fake_client.orders) > 0            # invested immediately on startup

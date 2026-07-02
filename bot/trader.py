@@ -122,6 +122,10 @@ class Trader:
         # Momentum rotation: the ISO week ("2026-W27") of the last rebalance, so
         # the weekly rotation fires at most once per week. None until the first.
         self._last_rebalance_week: str | None = None
+        # Whether we've done the first rebalance since (re)start. The first one
+        # fires as soon as the market is open — regardless of the configured
+        # rebalance weekday — so a fresh deploy doesn't sit in cash waiting.
+        self._did_initial_rebalance: bool = False
 
     # -- Public API ------------------------------------------------------
     def run_cycle(self) -> None:
@@ -785,12 +789,19 @@ class Trader:
         week_key = f"{iso_year}-W{iso_week:02d}"
         if self._last_rebalance_week == week_key:
             return  # already rebalanced this week
-        if (iso_weekday - 1) < config.MOMENTUM_REBALANCE_WEEKDAY:
+        # The first rebalance after a (re)start fires at the next market open,
+        # regardless of the configured weekday, so a fresh deploy invests right
+        # away instead of waiting for e.g. Monday. Subsequent rebalances hold to
+        # the weekly cadence on the configured weekday.
+        if self._did_initial_rebalance and (
+            (iso_weekday - 1) < config.MOMENTUM_REBALANCE_WEEKDAY
+        ):
             return  # not yet the rebalance weekday this week
         if not self._market_open_for_rebalance():
             return
         self._rebalance_momentum()
         self._last_rebalance_week = week_key
+        self._did_initial_rebalance = True
 
     def _market_open_for_rebalance(self) -> bool:
         """True when the stock market is open and outside the closing blackout —
