@@ -59,6 +59,17 @@ def _pnl_text(value: Any, prefix: str = "") -> Text:
     return Text(f"{prefix}{sign}${v:,.2f}", style=color)
 
 
+def _pct_text(value: Any) -> Text:
+    """Colored percentage from a *fraction* (Alpaca's unrealized_plpc: 0.05 => +5.00%)."""
+    try:
+        v = float(value) * 100.0
+    except (TypeError, ValueError):
+        return Text("—")
+    color = "green" if v >= 0 else "red"
+    sign = "+" if v >= 0 else ""
+    return Text(f"{sign}{v:.2f}%", style=color)
+
+
 def _short_time(ts: Any) -> str:
     """Render an ISO timestamp as HH:MM:SS (local-ish); fall back to str."""
     if not ts:
@@ -137,6 +148,8 @@ class TradingTUI:
         # Single line so the header fits a size-3 panel on short terminals.
         line = Text()
         line.append(f" {config.BOT_NAME} ", style="bold white on blue")
+        strat = "Momentum" if config.STRATEGY == "momentum" else "RSI"
+        line.append(f"  [{strat}]", style="bold cyan")
         line.append(f"  status: {self.status}{last_event}", style="dim")
         if self._data_error:
             line.append(f"  ! {self._data_error}", style="red")
@@ -171,18 +184,31 @@ class TradingTUI:
         table.add_column("Symbol", style="bold")
         table.add_column("Qty", justify="right")
         table.add_column("Price", justify="right")
-        table.add_column("Unrl P&L", justify="right")
-        if not positions:
-            table.add_row("—", "—", "—", "—")
+        table.add_column("Value", justify="right")
+        table.add_column("P&L $", justify="right")
+        table.add_column("P&L %", justify="right")
+        # Momentum is a stocks-only rotation; sort by size so the biggest
+        # holdings lead. (Sorting a copy — never mutate the cached list.)
+        rows = sorted(
+            positions,
+            key=lambda p: float(p.get("market_value") or 0),
+            reverse=True,
+        )
+        if not rows:
+            table.add_row("—", "—", "—", "—", "—", "—")
         else:
-            for p in positions:
+            for p in rows:
                 table.add_row(
                     str(p.get("symbol", "")),
                     f"{float(p.get('qty', 0)):g}",
                     _fmt_money(p.get("current_price")),
+                    _fmt_money(p.get("market_value")),
                     _pnl_text(p.get("unrealized_pl")),
+                    _pct_text(p.get("unrealized_plpc")),
                 )
-        return Panel(table, title="Open Positions", border_style="magenta")
+        is_momentum = config.STRATEGY == "momentum"
+        title = f"Fund Holdings ({len(rows)})" if is_momentum else "Open Positions"
+        return Panel(table, title=title, border_style="magenta")
 
     def _render_trades(self) -> Panel:
         try:

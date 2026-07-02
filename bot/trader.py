@@ -736,11 +736,44 @@ class Trader:
         except Exception as exc:  # noqa: BLE001 - the loop must never die
             self.log("error", f"momentum rebalance failed: {exc}")
         try:
-            self._record_snapshot()
+            self._record_snapshot_and_log_fund()
         except Exception as exc:  # noqa: BLE001
             self.log("error", f"snapshot failed: {exc}")
         self.last_cycle_at = _utc_now_iso()
         self.log("info", f"Cycle {self.cycle_count} complete.")
+
+    def _record_snapshot_and_log_fund(self) -> None:
+        """Record the account snapshot AND log a one-line fund summary, reusing a
+        single account+positions fetch. The summary line surfaces the current
+        holdings + live P&L in the headless journal (what the systemd service
+        shows), so the fund is visible without opening the dashboard."""
+        account = self.client.get_account()
+        positions = self.client.get_positions()
+        self.db.record_snapshot(
+            {
+                "equity": account.get("equity", 0.0),
+                "cash": account.get("cash", 0.0),
+                "buying_power": account.get("buying_power", 0.0),
+                "open_positions_count": len(positions),
+                "timestamp": _utc_now_iso(),
+            }
+        )
+        holdings = [
+            p for p in positions
+            if not is_crypto_symbol(str(p.get("symbol")))
+            and str(p.get("symbol")) not in self._crypto_position_aliases
+        ]
+        if not holdings:
+            return
+        market_value = sum(float(p.get("market_value") or 0) for p in holdings)
+        pnl = sum(float(p.get("unrealized_pl") or 0) for p in holdings)
+        cost = sum(float(p.get("cost_basis") or 0) for p in holdings)
+        pct = (pnl / cost * 100.0) if cost else 0.0
+        self.log(
+            "info",
+            f"Fund: {len(holdings)} holdings, value ${market_value:,.0f}, "
+            f"unrealized P&L {'+' if pnl >= 0 else ''}${pnl:,.0f} ({pct:+.1f}%).",
+        )
 
     def _maybe_rebalance_momentum(self) -> None:
         """Rebalance once per ISO week, on the first market-open cycle on/after

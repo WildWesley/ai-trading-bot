@@ -26,7 +26,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from bot import algorithm, config
+from bot import algorithm, config, momentum
 from bot.alpaca_client import is_crypto_symbol
 from bot.analytics import pair_round_trips
 from bot.database import Database
@@ -113,7 +113,155 @@ if client is not None:
 else:
     st.sidebar.info("No Alpaca keys — showing saved history only.")
 
-st.sidebar.caption(f"Watchlist: {', '.join(config.WATCHLIST)}")
+# Which strategy is live drives the whole UI framing (fund vs. intraday).
+if config.STRATEGY == "momentum":
+    st.sidebar.success(
+        f"Strategy: **Momentum rotation** — top {config.MOMENTUM_TOP_N}, "
+        f"rebalanced weekly."
+    )
+else:
+    st.sidebar.info("Strategy: **RSI intraday**.")
+
+st.sidebar.caption(f"Watchlist: {len(config.WATCHLIST)} symbols.")
+
+
+# ---------------------------------------------------------------------------
+# Momentum target (expensive: scans the whole universe). Cached 30 min and only
+# computed on demand, so it never runs on an ordinary auto-refresh.
+# ---------------------------------------------------------------------------
+@st.cache_data(ttl=1800, show_spinner="Scoring the universe…")
+def compute_momentum_target(_client: Any) -> list[str]:
+    universe = [
+        s for s in config.WATCHLIST
+        if not is_crypto_symbol(s) and s not in ("SPY", "QQQ")
+    ]
+    bars: dict[str, Any] = {}
+    for symbol in universe:
+        try:
+            df = _client.get_bars(symbol, "1Day", config.MOMENTUM_BARS_LOOKBACK)
+            if df is not None and not df.empty:
+                bars[symbol] = df
+        except Exception:  # noqa: BLE001 - skip a symbol that won't fetch
+            pass
+    return momentum.select_top(
+        bars,
+        lookback=config.MOMENTUM_LOOKBACK_DAYS,
+        skip=config.MOMENTUM_SKIP_DAYS,
+        sma_window=config.MOMENTUM_SMA_WINDOW,
+        top_n=config.MOMENTUM_TOP_N,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fund tab: the momentum book — current holdings with live per-stock gain/loss.
+# ---------------------------------------------------------------------------
+@st.fragment(run_every=refresh_every)
+def render_fund() -> None:
+    if client is None:
+        st.info("Connect Alpaca keys to see the live fund holdings.")
+        return
+    try:
+        account = client.get_account()
+        positions = client.get_positions()
+    except Exception as exc:  # noqa: BLE001
+        st.warning(f"Live fetch failed: {exc}")
+        return
+
+    # The momentum fund is stocks only; exclude any residual crypto.
+    holdings = [
+        p for p in positions if not is_crypto_symbol(str(p.get("symbol", "")))
+    ]
+    equity = float(account.get("equity") or 0.0)
+    cash = float(account.get("cash") or 0.0)
+    total_mv = sum(float(p.get("market_value") or 0.0) for p in holdings)
+    total_pnl = sum(float(p.get("unrealized_pl") or 0.0) for p in holdings)
+    total_cost = sum(float(p.get("cost_basis") or 0.0) for p in holdings)
+    total_pnl_pct = (total_pnl / total_cost * 100.0) if total_cost else 0.0
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Holdings", f"{len(holdings)}")
+    m2.metric(
+        "Invested",
+        fmt_money(total_mv),
+        f"{(total_mv / equity * 100):.0f}% of equity" if equity else None,
+    )
+    m3.metric("Unrealized P&L", fmt_pnl(total_pnl), f"{total_pnl_pct:+.2f}%")
+    m4.metric("Cash", fmt_money(cash))
+
+    if not holdings:
+        st.caption(
+            "No stock holdings yet — the momentum book fills on the next weekly "
+            "rebalance (Mondays, market open)."
+        )
+        return
+
+    rows = []
+    for p in holdings:
+        mv = float(p.get("market_value") or 0.0)
+        rows.append(
+            {
+                "Symbol": str(p.get("symbol", "")),
+                "Weight": (mv / total_mv * 100.0) if total_mv else 0.0,
+                "Qty": float(p.get("qty", 0.0)),
+                "Avg entry": float(p.get("avg_entry_price") or 0.0),
+                "Price": float(p.get("current_price") or 0.0),
+                "Value": mv,
+                "P&L $": float(p.get("unrealized_pl") or 0.0),
+                "P&L %": float(p.get("unrealized_plpc") or 0.0) * 100.0,
+            }
+        )
+    df = pd.DataFrame(rows).sort_values("Weight", ascending=False)
+    st.dataframe(
+        df,
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Weight": st.column_config.NumberColumn("Weight", format="%.1f%%"),
+            "Qty": st.column_config.NumberColumn(format="%.4f"),
+            "Avg entry": st.column_config.NumberColumn(format="$%.2f"),
+            "Price": st.column_config.NumberColumn(format="$%.2f"),
+            "Value": st.column_config.NumberColumn(format="$%.2f"),
+            "P&L $": st.column_config.NumberColumn(format="$%.2f"),
+            "P&L %": st.column_config.NumberColumn(format="%.2f%%"),
+        },
+    )
+    best = df.loc[df["P&L %"].idxmax()]
+    worst = df.loc[df["P&L %"].idxmin()]
+    st.caption(
+        f"🟢 Best: {best['Symbol']} {best['P&L %']:+.1f}%  ·  "
+        f"🔴 Worst: {worst['Symbol']} {worst['P&L %']:+.1f}%  ·  "
+        f"updated {datetime.now():%H:%M:%S}"
+    )
+
+    # Drift: what the strategy would pick right now vs. what we actually hold.
+    if config.STRATEGY == "momentum":
+        with st.expander("🎯 Momentum target vs. current book (drift)"):
+            st.caption(
+                f"The top {config.MOMENTUM_TOP_N} the strategy would pick now. "
+                "Scanning the whole universe (~325 names) takes a few seconds."
+            )
+            if st.button("Compute current target"):
+                target = compute_momentum_target(client)
+                if not target:
+                    st.caption("Could not compute a target (insufficient history).")
+                else:
+                    held = {r["Symbol"] for r in rows}
+                    tset = set(target)
+                    st.write(
+                        f"**Target ({len(target)}):** {', '.join(target)}"
+                    )
+                    to_sell = sorted(held - tset)
+                    to_buy = [s for s in target if s not in held]
+                    if to_sell:
+                        st.markdown(
+                            ":red[Would **sell** next rebalance:] " + ", ".join(to_sell)
+                        )
+                    if to_buy:
+                        st.markdown(
+                            ":green[Would **buy** next rebalance:] " + ", ".join(to_buy)
+                        )
+                    if not to_sell and not to_buy:
+                        st.success("The book already matches the target. ✅")
 
 
 # ---------------------------------------------------------------------------
@@ -166,10 +314,23 @@ def render_overview() -> None:
     with left:
         st.subheader("Open positions")
         if positions:
-            pos_df = pd.DataFrame(positions)[
-                ["symbol", "qty", "current_price", "market_value", "unrealized_pl"]
+            pos_df = pd.DataFrame(positions)
+            pos_df["unrealized_plpc"] = (
+                pd.to_numeric(pos_df.get("unrealized_plpc"), errors="coerce") * 100.0
+            )
+            pos_df = pos_df[
+                ["symbol", "qty", "current_price", "market_value",
+                 "unrealized_pl", "unrealized_plpc"]
             ]
-            st.dataframe(pos_df, hide_index=True, width="stretch")
+            st.dataframe(
+                pos_df, hide_index=True, width="stretch",
+                column_config={
+                    "current_price": st.column_config.NumberColumn("Price", format="$%.2f"),
+                    "market_value": st.column_config.NumberColumn("Value", format="$%.2f"),
+                    "unrealized_pl": st.column_config.NumberColumn("P&L $", format="$%.2f"),
+                    "unrealized_plpc": st.column_config.NumberColumn("P&L %", format="%.2f%%"),
+                },
+            )
         elif client is None:
             st.caption("Connect Alpaca keys to see live positions.")
         else:
@@ -475,9 +636,12 @@ def render_chart() -> None:
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-overview_tab, watchlist_tab, chart_tab = st.tabs(
-    ["Overview", "Watchlist", "Chart"]
+fund_tab, overview_tab, watchlist_tab, chart_tab = st.tabs(
+    ["Fund", "Overview", "Watchlist", "Chart"]
 )
+with fund_tab:
+    st.title("Fund holdings")
+    render_fund()
 with overview_tab:
     st.title("Account")
     render_overview()
