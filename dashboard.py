@@ -190,8 +190,9 @@ def render_fund() -> None:
 
     if not holdings:
         st.caption(
-            "No stock holdings yet — the momentum book fills on the next weekly "
-            "rebalance (Mondays, market open)."
+            "No stock holdings yet — the momentum book fills at the **next "
+            "market open** (the first rebalance after a restart is immediate), "
+            "then rebalances weekly on Tuesdays around noon ET."
         )
         return
 
