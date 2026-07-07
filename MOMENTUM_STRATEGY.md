@@ -24,8 +24,9 @@ intraday signal bot. Adopting it is a rebuild, not a config tweak.
    *Timing:* recurring rebalances run **Tuesday ~noon ET** (`MOMENTUM_REBALANCE_
    WEEKDAY=1`, `MOMENTUM_REBALANCE_HOUR_ET=12`) — backtests mildly favor Tue/Wed
    over Mon/Thu and midday avoids the volatile open (better fills). The **first**
-   rebalance after any restart ignores this and invests as soon as the market is
-   open (immediacy over fill quality for a one-time deploy).
+   rebalance after any restart fires promptly (ignoring the Tuesday/noon cadence)
+   but still waits ~30 min past the 9:30 ET open (`MOMENTUM_OPEN_SKIP_MINUTES`),
+   so it trades after the opening volatility rather than into it.
 6. **Exit ("when needed", no RSI):** at each weekly rebalance a name is sold if
    it (a) drops out of the top 15, or (b) falls below its 200-day SMA. That's
    the entire exit — a trend/relative-strength rule that lets winners run for

@@ -803,11 +803,23 @@ class Trader:
                 return  # not yet the rebalance weekday this week
             if now_et.hour < config.MOMENTUM_REBALANCE_HOUR_ET:
                 return  # wait for the calmer midday session
+        elif not self._past_opening_skip(now_et):
+            return  # startup: let the volatile first minutes after the open pass
         if not self._market_open_for_rebalance():
             return
         self._rebalance_momentum()
         self._last_rebalance_week = week_key
         self._did_initial_rebalance = True
+
+    def _past_opening_skip(self, now_et: datetime) -> bool:
+        """True once ``MOMENTUM_OPEN_SKIP_MINUTES`` have passed since the 9:30 ET
+        open — so the startup rebalance trades after the opening volatility, not
+        into it. 0 disables the wait (buy right at the open)."""
+        skip = config.MOMENTUM_OPEN_SKIP_MINUTES
+        if skip <= 0:
+            return True
+        open_t = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+        return (now_et - open_t).total_seconds() / 60.0 >= skip
 
     def _market_open_for_rebalance(self) -> bool:
         """True when the stock market is open and outside the closing blackout —

@@ -43,6 +43,9 @@ def _mom_config(monkeypatch):
     monkeypatch.setattr(config, "MOMENTUM_SKIP_DAYS", 1)
     monkeypatch.setattr(config, "MOMENTUM_SMA_WINDOW", 20)
     monkeypatch.setattr(config, "MOMENTUM_BARS_LOOKBACK", 30)
+    # Disable the opening-skip wait so startup-rebalance tests don't depend on
+    # the wall-clock time they happen to run at (its own test covers the wait).
+    monkeypatch.setattr(config, "MOMENTUM_OPEN_SKIP_MINUTES", 0)
 
 
 def test_rebalance_sells_leavers_buys_entrants(fake_client, fake_db, monkeypatch):
@@ -90,6 +93,20 @@ def test_buy_notional_rounded_to_cents(fake_client, fake_db, monkeypatch):
         n = o["notional"]
         assert round(n, 2) == n, f"notional {n} has >2 decimal places"
     assert buys[0]["notional"] == round(100_000 / 3, 2)   # 33333.33
+
+
+def test_past_opening_skip(fake_client, fake_db, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    et = ZoneInfo("America/New_York")
+    monkeypatch.setattr(config, "MOMENTUM_OPEN_SKIP_MINUTES", 30)
+    t = Trader(fake_client, fake_db, advisor=None, watchlist=["AAA"])
+    too_early = datetime(2026, 7, 7, 9, 45, tzinfo=et)   # 15 min after 9:30 open
+    past_skip = datetime(2026, 7, 7, 10, 15, tzinfo=et)  # 45 min after open
+    assert t._past_opening_skip(too_early) is False
+    assert t._past_opening_skip(past_skip) is True
+    monkeypatch.setattr(config, "MOMENTUM_OPEN_SKIP_MINUTES", 0)  # disabled
+    assert t._past_opening_skip(too_early) is True
 
 
 def test_rebalance_fires_once_per_week(fake_client, fake_db, monkeypatch):
