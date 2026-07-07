@@ -923,6 +923,9 @@ class Trader:
     def _place_buy(self, symbol: str, budget: float, reason: str) -> None:
         """Buy ~``budget`` dollars of a stock (notional if fractionable, else
         whole shares) and record the trade. Shared by the momentum rebalancer."""
+        # Alpaca rejects notional (dollar) orders with more than 2 decimal
+        # places, and equity/N is usually a repeating decimal — round to cents.
+        budget = round(budget, 2)
         price = self.client.get_latest_price(symbol)
         if not price or price <= 0:
             self.log("error", f"{symbol}: no valid price; skipping BUY.")

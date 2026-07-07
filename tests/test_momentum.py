@@ -75,6 +75,23 @@ def test_rebalance_sells_leavers_buys_entrants(fake_client, fake_db, monkeypatch
     assert aaa["notional"] == 50_000.0
 
 
+def test_buy_notional_rounded_to_cents(fake_client, fake_db, monkeypatch):
+    # equity/N is a repeating decimal (100000/3 = 33333.33...); Alpaca rejects
+    # notional with >2 decimals, so every buy must be rounded to cents.
+    _mom_config(monkeypatch)
+    monkeypatch.setattr(config, "MOMENTUM_TOP_N", 3)
+    fake_client.bars_daily = {"AAA": _bars(2.0), "BBB": _bars(1.5), "CCC": _bars(1.0)}
+    t = Trader(fake_client, fake_db, advisor=None, watchlist=["AAA", "BBB", "CCC"])
+    t._rebalance_momentum()
+    buys = [o for o in fake_client.orders
+            if o["side"] == "buy" and o.get("notional") is not None]
+    assert buys, "expected notional buy orders"
+    for o in buys:
+        n = o["notional"]
+        assert round(n, 2) == n, f"notional {n} has >2 decimal places"
+    assert buys[0]["notional"] == round(100_000 / 3, 2)   # 33333.33
+
+
 def test_rebalance_fires_once_per_week(fake_client, fake_db, monkeypatch):
     _mom_config(monkeypatch)
     monkeypatch.setattr(config, "MOMENTUM_REBALANCE_WEEKDAY", 0)  # any weekday qualifies
