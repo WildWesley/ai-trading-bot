@@ -1,0 +1,10 @@
+[Unit]
+Description=Health-check the dashboard/Cloudflare tunnel and restart if stuck
+After=dashboard.service cloudflared.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%REPO%
+ExecStart=/usr/bin/bash %REPO%/deploy/tunnel-watchdog.sh
+StandardOutput=journal
+StandardError=journal

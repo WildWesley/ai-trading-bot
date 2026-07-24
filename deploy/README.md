@@ -67,6 +67,29 @@ The **trading-bot** service runs the bot headless; the **dashboard** service run
 
 The dashboard is now at `https://trading-bot.yourdomain.com`. It is read-only — it shows account, positions, trades, equity curve, and the strategy chart, with no controls to place or cancel trades.
 
+## Tunnel watchdog
+
+`cloudflared`'s Quick Tunnel can get stuck in an internal reconnect loop
+(repeated "control stream encountered a failure" in `journalctl -u
+cloudflared`) without the process ever exiting — so `Restart=on-failure`
+never kicks in, and the dashboard can be unreachable from the outside for
+days while looking "running" in `systemctl status`.
+
+`tunnel-watchdog.timer` runs `deploy/tunnel-watchdog.sh` every 5 minutes. It
+curls the local dashboard and the current public tunnel URL (parsed from the
+cloudflared log), and restarts whichever service is unresponsive.
+
+`setup-pi.sh` installs and can enable it; on an existing install:
+
+```bash
+sudo cp deploy/tunnel-watchdog.service /etc/systemd/system/
+sudo sed -i "/^\[Service\]/a User=$(whoami)" /etc/systemd/system/tunnel-watchdog.service
+sudo sed -i "s#%REPO%#$(pwd)#g" /etc/systemd/system/tunnel-watchdog.service
+sudo cp deploy/tunnel-watchdog.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now tunnel-watchdog.timer
+```
+
 ## Updating the bot later
 
 ```bash

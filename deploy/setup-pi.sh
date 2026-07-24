@@ -41,7 +41,7 @@ if ! command -v cloudflared >/dev/null 2>&1; then
 fi
 
 echo "==> Installing systemd units (substituting repo/home)..."
-for unit in trading-bot dashboard cloudflared; do
+for unit in trading-bot dashboard cloudflared tunnel-watchdog; do
   # Substitute placeholders with the real paths and install as a system unit.
   #   %REPO% -> the cloned repo directory (wherever it actually lives)
   #   %h     -> the user's home (used by cloudflared's --config path)
@@ -55,6 +55,7 @@ for unit in trading-bot dashboard cloudflared; do
   sudo sed -i "/^\[Service\]/a User=${RUN_USER}" \
     "/etc/systemd/system/${unit}.service"
 done
+sudo cp "$REPO_DIR/deploy/tunnel-watchdog.timer" /etc/systemd/system/tunnel-watchdog.timer
 sudo systemctl daemon-reload
 
 cat <<EOF
@@ -71,7 +72,9 @@ Next (manual) steps — see deploy/README.md for detail:
        cloudflared tunnel route dns trading-bot <your-hostname>
   3. Enable and start the services:
        sudo systemctl enable --now trading-bot dashboard cloudflared
+       sudo systemctl enable --now tunnel-watchdog.timer
   4. Check status / logs:
        systemctl status trading-bot dashboard cloudflared
+       systemctl status tunnel-watchdog.timer
        journalctl -u trading-bot -f
 EOF
